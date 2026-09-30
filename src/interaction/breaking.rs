@@ -1,10 +1,8 @@
 use bevy::prelude::*;
+use crate::core::state::{HOTBAR, SelectedSlot};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
 use super::raycast::TargetBlock;
-
-/// Какой блок ставить по ПКМ (пока что фиксированный — хотбар будет позже)
-const PLACE_BLOCK: BlockType = BlockType::Stone;
 
 pub struct BreakingPlugin;
 
@@ -27,7 +25,6 @@ fn handle_break(
     }
     let Some(hit) = target.hit else { return; };
 
-    // Нельзя ломать самый низ мира (как bedrock)
     if hit.block.y <= 0 {
         return;
     }
@@ -39,13 +36,13 @@ fn handle_break(
 
     world.set(hit.block.x, hit.block.y, hit.block.z, BlockType::Air);
     dirty.mark(hit.block.x, hit.block.z);
-    info!("Broke block at {:?}", hit.block);
 }
 
-/// ПКМ — поставить блок
+/// ПКМ — поставить блок из выбранного слота
 fn handle_place(
     mouse: Res<ButtonInput<MouseButton>>,
     target: Res<TargetBlock>,
+    selected: Res<SelectedSlot>,
     mut world: ResMut<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     player_q: Query<&Transform, With<Player>>,
@@ -55,7 +52,6 @@ fn handle_place(
     }
     let Some(hit) = target.hit else { return; };
 
-    // Если камера внутри блока — нормаль = 0, ставить некуда
     if hit.normal == IVec3::ZERO {
         return;
     }
@@ -68,16 +64,15 @@ fn handle_place(
         return;
     }
 
-    // Нельзя ставить блок внутрь игрока
     if let Ok(player_tf) = player_q.get_single() {
         if block_intersects_player(pos, player_tf.translation) {
             return;
         }
     }
 
-    world.set(pos.x, pos.y, pos.z, PLACE_BLOCK);
+    let block_to_place = HOTBAR[selected.0];
+    world.set(pos.x, pos.y, pos.z, block_to_place);
     dirty.mark(pos.x, pos.z);
-    info!("Placed block at {:?}", pos);
 }
 
 /// Пересекается ли блок (x,y,z) с AABB игрока

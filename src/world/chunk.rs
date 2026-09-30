@@ -9,12 +9,22 @@ use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
 // ============================================================
 // БЛОКИ
 // ============================================================
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlockType {
     Air,
     Grass,
     Dirt,
     Stone,
+    Cobblestone,
+    Sand,
+    Log,
+    Leaves,
+    Planks,
+    Brick,
+    Glass,
+    Snow,
+    Obsidian,
 }
 
 impl BlockType {
@@ -26,30 +36,69 @@ impl BlockType {
     #[inline]
     pub fn top_tile(self) -> u32 {
         match self {
-            BlockType::Air => 0,
+            BlockType::Air | BlockType::Stone | BlockType::Obsidian => 3,
             BlockType::Grass => 0,
             BlockType::Dirt => 2,
-            BlockType::Stone => 3,
+            BlockType::Cobblestone => 4,
+            BlockType::Sand => 5,
+            BlockType::Log | BlockType::Planks => 7,
+            BlockType::Leaves => 8,
+            BlockType::Brick => 10,
+            BlockType::Glass => 11,
+            BlockType::Snow => 12,
         }
     }
 
     #[inline]
     pub fn side_tile(self) -> u32 {
         match self {
-            BlockType::Air => 0,
+            BlockType::Air => 3,
             BlockType::Grass => 1,
             BlockType::Dirt => 2,
             BlockType::Stone => 3,
+            BlockType::Cobblestone => 4,
+            BlockType::Sand => 5,
+            BlockType::Log => 6,
+            BlockType::Leaves => 8,
+            BlockType::Planks => 9,
+            BlockType::Brick => 10,
+            BlockType::Glass => 11,
+            BlockType::Snow => 12,
+            BlockType::Obsidian => 13,
         }
     }
 
     #[inline]
     pub fn bottom_tile(self) -> u32 {
         match self {
-            BlockType::Air => 0,
-            BlockType::Grass => 2,
-            BlockType::Dirt => 2,
-            BlockType::Stone => 3,
+            BlockType::Air | BlockType::Stone => 3,
+            BlockType::Grass | BlockType::Dirt => 2,
+            BlockType::Cobblestone => 4,
+            BlockType::Sand => 5,
+            BlockType::Log | BlockType::Planks => 7,
+            BlockType::Leaves => 8,
+            BlockType::Brick => 10,
+            BlockType::Glass => 11,
+            BlockType::Snow => 12,
+            BlockType::Obsidian => 13,
+        }
+    }
+
+    pub fn icon_color(self) -> Color {
+        match self {
+            BlockType::Air => Color::srgba(0.0, 0.0, 0.0, 0.0),
+            BlockType::Grass => Color::srgb(0.30, 0.60, 0.15),
+            BlockType::Dirt => Color::srgb(0.45, 0.32, 0.20),
+            BlockType::Stone => Color::srgb(0.45, 0.45, 0.45),
+            BlockType::Cobblestone => Color::srgb(0.38, 0.38, 0.38),
+            BlockType::Sand => Color::srgb(0.80, 0.75, 0.58),
+            BlockType::Log => Color::srgb(0.42, 0.30, 0.18),
+            BlockType::Leaves => Color::srgb(0.25, 0.50, 0.25),
+            BlockType::Planks => Color::srgb(0.65, 0.52, 0.32),
+            BlockType::Brick => Color::srgb(0.59, 0.26, 0.20),
+            BlockType::Glass => Color::srgb(0.78, 0.88, 0.94),
+            BlockType::Snow => Color::srgb(0.92, 0.96, 0.99),
+            BlockType::Obsidian => Color::srgb(0.15, 0.11, 0.23),
         }
     }
 }
@@ -129,14 +178,21 @@ impl DirtyChunks {
         let lz = z.rem_euclid(CHUNK_SIZE);
 
         self.0.push(IVec2::new(cx, cz));
-        if lx == 0 { self.0.push(IVec2::new(cx - 1, cz)); }
-        if lx == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx + 1, cz)); }
-        if lz == 0 { self.0.push(IVec2::new(cx, cz - 1)); }
-        if lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx, cz + 1)); }
-        if lx == 0 && lz == 0 { self.0.push(IVec2::new(cx - 1, cz - 1)); }
-        if lx == 0 && lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx - 1, cz + 1)); }
-        if lx == CHUNK_SIZE - 1 && lz == 0 { self.0.push(IVec2::new(cx + 1, cz - 1)); }
-        if lx == CHUNK_SIZE - 1 && lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx + 1, cz + 1)); }
+
+        let near_min_x = lx == 0;
+        let near_max_x = lx == CHUNK_SIZE - 1;
+        let near_min_z = lz == 0;
+        let near_max_z = lz == CHUNK_SIZE - 1;
+
+        if near_min_x { self.0.push(IVec2::new(cx - 1, cz)); }
+        if near_max_x { self.0.push(IVec2::new(cx + 1, cz)); }
+        if near_min_z { self.0.push(IVec2::new(cx, cz - 1)); }
+        if near_max_z { self.0.push(IVec2::new(cx, cz + 1)); }
+
+        if near_min_x && near_min_z { self.0.push(IVec2::new(cx - 1, cz - 1)); }
+        if near_min_x && near_max_z { self.0.push(IVec2::new(cx - 1, cz + 1)); }
+        if near_max_x && near_min_z { self.0.push(IVec2::new(cx + 1, cz - 1)); }
+        if near_max_x && near_max_z { self.0.push(IVec2::new(cx + 1, cz + 1)); }
     }
 }
 
@@ -165,7 +221,6 @@ fn draw_tile(
 ) {
     let tx = (tile_idx % ATLAS_COLS) * ATLAS_TILE;
     let ty = (tile_idx / ATLAS_COLS) * ATLAS_TILE;
-
     for py in 0..ATLAS_TILE {
         for px in 0..ATLAS_TILE {
             let color = painter(px, py, seed);
@@ -190,7 +245,6 @@ fn make_atlas() -> Vec<u8> {
         let base = (0.30 + n * 0.15) * 255.0;
         [(base * 0.55) as u8, base as u8, (base * 0.30) as u8, 255]
     });
-
     draw_tile(&mut data, w, 1, 2, |x, y, s| {
         let n = hash(x, y, s);
         let edge = 3 + (hash(x, 0, s + 7) * 2.0) as u32;
@@ -202,19 +256,16 @@ fn make_atlas() -> Vec<u8> {
             [base as u8, (base * 0.70) as u8, (base * 0.45) as u8, 255]
         }
     });
-
     draw_tile(&mut data, w, 2, 3, |x, y, s| {
         let n = hash(x, y, s);
         let base = (0.45 + n * 0.12) * 255.0;
         [base as u8, (base * 0.70) as u8, (base * 0.45) as u8, 255]
     });
-
     draw_tile(&mut data, w, 3, 4, |x, y, s| {
         let n = hash(x, y, s);
         let base = (0.42 + n * 0.12) * 255.0;
         [base as u8, base as u8, base as u8, 255]
     });
-
     draw_tile(&mut data, w, 4, 5, |x, y, _s| {
         let gx = x / 4;
         let gy = y / 4;
@@ -224,20 +275,17 @@ fn make_atlas() -> Vec<u8> {
         let base = base as u8;
         [base, base, base, 255]
     });
-
     draw_tile(&mut data, w, 5, 6, |x, y, s| {
         let n = hash(x, y, s);
         let base = (0.80 + n * 0.08) * 255.0;
         [base as u8, (base * 0.94) as u8, (base * 0.72) as u8, 255]
     });
-
     draw_tile(&mut data, w, 6, 7, |x, y, s| {
         let n = hash(x, y, s);
         let stripe = ((x as f32 * 0.9).sin() * 0.05).abs();
         let base = (0.42 + n * 0.08 + stripe) * 255.0;
         [base as u8, (base * 0.72) as u8, (base * 0.42) as u8, 255]
     });
-
     draw_tile(&mut data, w, 7, 8, |x, y, _s| {
         let dx = x as f32 - 7.5;
         let dy = y as f32 - 7.5;
@@ -246,7 +294,6 @@ fn make_atlas() -> Vec<u8> {
         let base = (0.55 + ring) * 255.0;
         [base as u8, (base * 0.78) as u8, (base * 0.48) as u8, 255]
     });
-
     draw_tile(&mut data, w, 8, 9, |x, y, s| {
         let n = hash(x, y, s);
         let dark = if n < 0.2 { -0.15 } else { 0.0 };
@@ -254,7 +301,6 @@ fn make_atlas() -> Vec<u8> {
         let base = base as u8;
         [base, ((base as f32) * 2.2).min(255.0) as u8, base, 255]
     });
-
     draw_tile(&mut data, w, 9, 10, |x, y, s| {
         let n = hash(x, y, s);
         let row = y / 4;
@@ -264,7 +310,6 @@ fn make_atlas() -> Vec<u8> {
         let base = base as u8;
         [base, (base as f32 * 0.80) as u8, (base as f32 * 0.50) as u8, 255]
     });
-
     draw_tile(&mut data, w, 10, 11, |x, y, s| {
         let n = hash(x, y, s);
         let row = y / 4;
@@ -276,23 +321,17 @@ fn make_atlas() -> Vec<u8> {
             [r as u8, 66, 51, 255]
         }
     });
-
-    draw_tile(&mut data, w, 11, 12, |_x, _y, _s| {
-        [200, 226, 240, 255]
-    });
-
+    draw_tile(&mut data, w, 11, 12, |_x, _y, _s| [200, 226, 240, 255]);
     draw_tile(&mut data, w, 12, 13, |x, y, s| {
         let n = hash(x, y, s);
         let base = (0.92 + n * 0.05) * 255.0;
         [base as u8, (base * 0.98) as u8, (base * 0.99) as u8, 255]
     });
-
     draw_tile(&mut data, w, 13, 14, |x, y, s| {
         let n = hash(x, y, s);
         let base = (0.15 + n * 0.10) * 255.0;
         [base as u8, (base * 0.75) as u8, (base * 1.25).min(255.0) as u8, 255]
     });
-
     data
 }
 
@@ -302,18 +341,11 @@ fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
     let tr = (tile / ATLAS_COLS) as f32;
     let cols = ATLAS_COLS as f32;
     let rows = ATLAS_ROWS as f32;
-
     let u0 = tc / cols;
     let u1 = (tc + 1.0) / cols;
     let v_top = tr / rows;
     let v_bot = (tr + 1.0) / rows;
-
-    [
-        [u0, v_bot],
-        [u1, v_bot],
-        [u1, v_top],
-        [u0, v_top],
-    ]
+    [[u0, v_bot], [u1, v_bot], [u1, v_top], [u0, v_top]]
 }
 
 // ============================================================
@@ -347,7 +379,6 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
                     if world.is_solid(x + dir[0], y + dir[1], z + dir[2]) {
                         continue;
                     }
-
                     let tile = match i {
                         2 => block.top_tile(),
                         3 => block.bottom_tile(),
@@ -365,19 +396,13 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
                         normals.push([dir[0] as f32, dir[1] as f32, dir[2] as f32]);
                         uvs.push(tuv[j]);
                     }
-                    indices.extend_from_slice(&[
-                        base, base + 1, base + 2,
-                        base, base + 2, base + 3,
-                    ]);
+                    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
             }
         }
     }
 
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -386,7 +411,7 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
 }
 
 // ============================================================
-// КОМПОНЕНТ ЧАНКА
+// КОМПОНЕНТ
 // ============================================================
 #[derive(Component)]
 pub struct ChunkMesh {
@@ -402,12 +427,12 @@ impl Plugin for ChunkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AmbientLight {
             color: Color::WHITE,
-            brightness: 350.0,
+            brightness: 1200.0,  // было 350 — теперь стены не чёрные
         })
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()
         .add_systems(PostStartup, spawn_all_chunks)
-        .add_systems(Update, rebuild_dirty_chunks);
+        .add_systems(PostUpdate, rebuild_dirty_chunks);
         info!("ChunkPlugin loaded.");
     }
 }
@@ -421,7 +446,6 @@ fn spawn_all_chunks(
 ) {
     info!("Generating atlas...");
     let t_atlas = std::time::Instant::now();
-
     let atlas_data = make_atlas();
     let mut atlas_image = Image::new(
         Extent3d {
@@ -436,7 +460,6 @@ fn spawn_all_chunks(
     );
     atlas_image.sampler = ImageSampler::nearest();
     let atlas_handle = images.add(atlas_image);
-
     info!("Atlas generated in {:?}", t_atlas.elapsed());
 
     let material = materials.add(StandardMaterial {
@@ -477,23 +500,30 @@ fn spawn_all_chunks(
         total_vertices
     );
 
+    // --- Основной свет (солнце) ---
     commands.spawn((
         DirectionalLight {
-            illuminance: 10000.0,
+            illuminance: 8000.0,
             shadows_enabled: false,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::YXZ,
-            -0.9,
-            -0.5,
-            0.0,
-        )),
+        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
+    ));
+
+    // --- Дополнительный свет "от неба" с другой стороны ---
+    // Убирает чёрные провалы на вертикальных гранях в ямах
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 4000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 0.8, 2.5, 0.0)),
     ));
 }
 
 fn rebuild_dirty_chunks(
-    world: Res<WorldData>,          // ← убран mut
+    world: Res<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut chunk_q: Query<(&ChunkMesh, &mut Mesh3d)>,
@@ -504,19 +534,34 @@ fn rebuild_dirty_chunks(
     dirty.0.dedup();
 
     let coords: Vec<IVec2> = dirty.0.drain(..).collect();
+    let t0 = std::time::Instant::now();
+    let mut rebuilt = 0;
+    let mut total_verts = 0usize;
 
     for coord in coords {
         if coord.x < 0 || coord.x >= (SX / CHUNK_SIZE) { continue; }
         if coord.y < 0 || coord.y >= (SZ / CHUNK_SIZE) { continue; }
 
         let new_mesh = build_chunk_mesh(&world, coord.x, coord.y);
+        let verts = new_mesh.count_vertices();
+        total_verts += verts;
         let new_handle = meshes.add(new_mesh);
 
         for (chunk, mut mesh3d) in chunk_q.iter_mut() {
             if chunk.coord == coord {
                 mesh3d.0 = new_handle.clone();
+                rebuilt += 1;
                 break;
             }
         }
+    }
+
+    if rebuilt > 0 {
+        info!(
+            "Rebuilt {} chunks in {:?}  ({} verts total)",
+            rebuilt,
+            t0.elapsed(),
+            total_verts
+        );
     }
 }

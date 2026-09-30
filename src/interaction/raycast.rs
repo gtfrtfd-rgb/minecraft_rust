@@ -6,11 +6,8 @@ pub const REACH_DISTANCE: f32 = 5.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TargetHit {
-    /// Координаты блока, в который попал луч
     pub block: IVec3,
-    /// Нормаль грани (сторона, в которую мы смотрим)
     pub normal: IVec3,
-    /// Свободная клетка перед блоком — сюда ставится новый блок
     pub prev: IVec3,
 }
 
@@ -38,25 +35,37 @@ fn update_target(
         return;
     };
     let origin = cam_tf.translation;
-    let dir = cam_tf.forward().as_vec3();   // Dir3 → Vec3
-
+    let dir = cam_tf.forward().as_vec3();
     target.hit = raycast(&world, origin, dir, REACH_DISTANCE);
 }
 
 fn draw_target_highlight(
     mut gizmos: Gizmos,
     target: Res<TargetBlock>,
+    cam_q: Query<&Transform, With<PlayerCamera>>,
 ) {
-    if let Some(hit) = target.hit {
-        let center = hit.block.as_vec3() + Vec3::splat(0.5);
-        gizmos.cuboid(
-            Transform::from_translation(center).with_scale(Vec3::splat(1.005)),
-            Color::BLACK,
-        );
+    let Some(hit) = target.hit else { return; };
+    let Ok(cam_tf) = cam_q.get_single() else { return; };
+
+    // Расстояние до БЛИЖАЙШЕЙ ТОЧКИ куба, а не до центра.
+    // Если камера почти касается блока — не рисуем рамку,
+    // иначе её рёбра вытянутся на весь экран.
+    let bmin = hit.block.as_vec3();
+    let bmax = bmin + Vec3::ONE;
+    let p = cam_tf.translation;
+    let nearest = p.clamp(bmin, bmax);
+
+    if (nearest - p).length() < 1.0 {
+        return;
     }
+
+    let center = bmin + Vec3::splat(0.5);
+    gizmos.cuboid(
+        Transform::from_translation(center).with_scale(Vec3::splat(1.002)),
+        Color::BLACK,
+    );
 }
 
-/// DDA-рейкаст по вокселям
 pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<TargetHit> {
     let mut x = origin.x.floor() as i32;
     let mut y = origin.y.floor() as i32;
@@ -73,21 +82,15 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     let mut t_max_x = if step_x != 0 {
         let next = if step_x > 0 { x as f32 + 1.0 } else { x as f32 };
         ((next - origin.x) / dir.x).abs()
-    } else {
-        f32::INFINITY
-    };
+    } else { f32::INFINITY };
     let mut t_max_y = if step_y != 0 {
         let next = if step_y > 0 { y as f32 + 1.0 } else { y as f32 };
         ((next - origin.y) / dir.y).abs()
-    } else {
-        f32::INFINITY
-    };
+    } else { f32::INFINITY };
     let mut t_max_z = if step_z != 0 {
         let next = if step_z > 0 { z as f32 + 1.0 } else { z as f32 };
         ((next - origin.z) / dir.z).abs()
-    } else {
-        f32::INFINITY
-    };
+    } else { f32::INFINITY };
 
     let mut normal = IVec3::ZERO;
 
@@ -99,7 +102,6 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
                 prev: IVec3::new(x, y, z) + normal,
             });
         }
-
         if t_max_x < t_max_y {
             if t_max_x < t_max_z {
                 x += step_x;
@@ -126,6 +128,5 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
             }
         }
     }
-
     None
 }
