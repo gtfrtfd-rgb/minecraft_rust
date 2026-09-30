@@ -3,12 +3,9 @@ use bevy::asset::RenderAssetUsages;
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
-use bevy::render::render_resource::Face;
+use bevy::render::view::NoFrustumCulling;
 use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
 
-// ============================================================
-// БЛОКИ
-// ============================================================
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlockType {
@@ -103,9 +100,6 @@ impl BlockType {
     }
 }
 
-// ============================================================
-// ДАННЫЕ МИРА
-// ============================================================
 #[derive(Resource)]
 pub struct WorldData {
     pub blocks: Vec<BlockType>,
@@ -164,9 +158,6 @@ impl WorldData {
     }
 }
 
-// ============================================================
-// СПИСОК ЧАНКОВ НА ПЕРЕСТРОЙКУ
-// ============================================================
 #[derive(Resource, Default)]
 pub struct DirtyChunks(pub Vec<IVec2>);
 
@@ -196,9 +187,6 @@ impl DirtyChunks {
     }
 }
 
-// ============================================================
-// АТЛАС
-// ============================================================
 const ATLAS_TILE: u32 = 16;
 const ATLAS_COLS: u32 = 4;
 const ATLAS_ROWS: u32 = 4;
@@ -348,9 +336,6 @@ fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
     [[u0, v_bot], [u1, v_bot], [u1, v_top], [u0, v_top]]
 }
 
-// ============================================================
-// МЕШ
-// ============================================================
 const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
     ([1, 0, 0],  [[1.0,0.0,1.0],[1.0,0.0,0.0],[1.0,1.0,0.0],[1.0,1.0,1.0]]),
     ([-1, 0, 0], [[0.0,0.0,0.0],[0.0,0.0,1.0],[0.0,1.0,1.0],[0.0,1.0,0.0]]),
@@ -410,24 +395,18 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
     mesh
 }
 
-// ============================================================
-// КОМПОНЕНТ
-// ============================================================
 #[derive(Component)]
 pub struct ChunkMesh {
     pub coord: IVec2,
 }
 
-// ============================================================
-// ПЛАГИН
-// ============================================================
 pub struct ChunkPlugin;
 
 impl Plugin for ChunkPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AmbientLight {
             color: Color::WHITE,
-            brightness: 1200.0,  // было 350 — теперь стены не чёрные
+            brightness: 1200.0,
         })
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()
@@ -466,7 +445,7 @@ fn spawn_all_chunks(
         base_color: Color::WHITE,
         base_color_texture: Some(atlas_handle),
         unlit: false,
-        cull_mode: Some(Face::Back),
+        cull_mode: None,   // double-sided: чтобы видеть нижние грани
         perceptual_roughness: 1.0,
         metallic: 0.0,
         ..default()
@@ -483,11 +462,17 @@ fn spawn_all_chunks(
             let mesh = build_chunk_mesh(&world, cx, cz);
             total_vertices += mesh.count_vertices();
             let handle = meshes.add(mesh);
+
+            // ВАЖНО: NoFrustumCulling — иначе Bevy неправильно отсеивает
+            // чанки, потому что их меши строятся в мировых координатах,
+            // а Transform = (0,0,0). Без этого чанки могут "пропадать",
+            // когда игрок поворачивает камеру.
             commands.spawn((
                 Mesh3d(handle),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
                 ChunkMesh { coord: IVec2::new(cx, cz) },
+                NoFrustumCulling,
                 Name::new(format!("Chunk({}, {})", cx, cz)),
             ));
         }
@@ -500,7 +485,6 @@ fn spawn_all_chunks(
         total_vertices
     );
 
-    // --- Основной свет (солнце) ---
     commands.spawn((
         DirectionalLight {
             illuminance: 8000.0,
@@ -510,8 +494,6 @@ fn spawn_all_chunks(
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
     ));
 
-    // --- Дополнительный свет "от неба" с другой стороны ---
-    // Убирает чёрные провалы на вертикальных гранях в ямах
     commands.spawn((
         DirectionalLight {
             illuminance: 4000.0,

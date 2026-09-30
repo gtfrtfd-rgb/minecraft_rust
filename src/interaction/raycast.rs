@@ -47,15 +47,13 @@ fn draw_target_highlight(
     let Some(hit) = target.hit else { return; };
     let Ok(cam_tf) = cam_q.get_single() else { return; };
 
-    // Расстояние до БЛИЖАЙШЕЙ ТОЧКИ куба, а не до центра.
-    // Если камера почти касается блока — не рисуем рамку,
-    // иначе её рёбра вытянутся на весь экран.
+    // Не рисуем подсветку, если блок ближе 2.5м —
+    // иначе его рёбра растянутся на пол-экрана.
     let bmin = hit.block.as_vec3();
     let bmax = bmin + Vec3::ONE;
     let p = cam_tf.translation;
     let nearest = p.clamp(bmin, bmax);
-
-    if (nearest - p).length() < 1.0 {
+    if (nearest - p).length() < 2.5 {
         return;
     }
 

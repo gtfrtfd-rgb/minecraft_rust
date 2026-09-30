@@ -13,7 +13,7 @@ impl Plugin for BreakingPlugin {
     }
 }
 
-/// ЛКМ — сломать блок под прицелом
+/// ЛКМ — сломать блок под прицелом (можно копать и под собой)
 fn handle_break(
     mouse: Res<ButtonInput<MouseButton>>,
     target: Res<TargetBlock>,
@@ -25,6 +25,7 @@ fn handle_break(
     }
     let Some(hit) = target.hit else { return; };
 
+    // Y=0 — bedrock, не копается
     if hit.block.y <= 0 {
         return;
     }
@@ -64,6 +65,7 @@ fn handle_place(
         return;
     }
 
+    // Нельзя ставить блок внутрь себя
     if let Ok(player_tf) = player_q.get_single() {
         if block_intersects_player(pos, player_tf.translation) {
             return;
@@ -75,7 +77,7 @@ fn handle_place(
     dirty.mark(pos.x, pos.z);
 }
 
-/// Пересекается ли блок (x,y,z) с AABB игрока
+/// Пересекается ли блок (x,y,z) с AABB игрока (для ПКМ)
 fn block_intersects_player(block: IVec3, player_pos: Vec3) -> bool {
     const PR: f32 = 0.3;
     const PH: f32 = 1.8;

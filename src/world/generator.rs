@@ -21,10 +21,12 @@ fn generate_terrain(mut world: ResMut<WorldData>, seed: Res<WorldSeed>) {
     for z in 0..SZ {
         for x in 0..SX {
             let n = perlin.get([x as f64 / 64.0, z as f64 / 64.0]);
-            let height = ((n * 12.0 + 18.0) as i32).clamp(3, SY - 5);
+            let height = ((n * 12.0 + 18.0) as i32).clamp(4, SY - 5);
 
             for y in 0..height {
-                let block = if y < height - 3 {
+                let block = if y <= 1 {
+                    BlockType::Obsidian
+                } else if y < height - 3 {
                     BlockType::Stone
                 } else if y == height - 1 {
                     BlockType::Grass
