@@ -25,7 +25,7 @@ fn main() {
                 resolution: (1280.0_f32, 720.0_f32).into(),
                 cursor_options: CursorOptions {
                     visible: false,
-                    grab_mode: CursorGrabMode::Locked,
+                    grab_mode: CursorGrabMode::Confined,
                     ..default()
                 },
                 ..default()
