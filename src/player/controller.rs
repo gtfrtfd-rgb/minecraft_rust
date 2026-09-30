@@ -6,10 +6,10 @@ const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_RADIUS: f32 = 0.3;
 const GRAVITY: f32 = 28.0;
 const JUMP_VELOCITY: f32 = 9.0;
-const WALK_SPEED: f32 = 4.6;
-const SPRINT_SPEED: f32 = 7.4;
-const FLY_SPEED: f32 = 12.0;
-const FLY_SPEED_FAST: f32 = 26.0;
+const WALK_SPEED: f32 = 6.0;         // было 4.6
+const SPRINT_SPEED: f32 = 9.5;       // было 7.4
+const FLY_SPEED: f32 = 15.0;         // было 12.0
+const FLY_SPEED_FAST: f32 = 30.0;    // было 26.0
 
 #[derive(Component)]
 pub struct Player {
@@ -81,44 +81,36 @@ fn player_movement(
 ) {
     let dt = time.delta_secs().min(0.05);
 
-    // ----- Направления относительно камеры -----
-    // yaw = 0   → игрок смотрит в сторону -Z
-    // yaw = π/2 → игрок смотрит в сторону -X
+    // Направления относительно камеры
     let yaw = look.yaw;
     let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
     let right   = Vec3::new( yaw.cos(), 0.0, -yaw.sin());
 
     for (mut transform, mut player) in player_q.iter_mut() {
-        // ----- Ввод: WASD + стрелки -----
+        // Ввод
         let mut dir = Vec3::ZERO;
 
-        // Вперёд
         if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
             dir += forward;
         }
-        // Назад
         if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
             dir -= forward;
         }
-        // Вправо
         if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
             dir += right;
         }
-        // Влево
         if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
             dir -= right;
         }
 
-        // Нормализуем диагонали, чтобы не двигаться быстрее
         if dir.length_squared() > 0.0 {
             dir = dir.normalize();
         }
 
-        // Модификаторы
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
         let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
-        // ----- Полёт / Ходьба -----
+        // Полёт
         if player.fly {
             let speed = if ctrl { FLY_SPEED_FAST } else { FLY_SPEED };
 
@@ -128,7 +120,6 @@ fn player_movement(
 
             player.velocity = vel;
 
-            // Пробуем двигаться по осям отдельно — чтобы не застревать
             let pos = transform.translation;
 
             let new_x = pos.x + player.velocity.x * dt;
@@ -152,16 +143,15 @@ fn player_movement(
         let speed = if ctrl { SPRINT_SPEED } else { WALK_SPEED };
         let horiz_vel = dir * speed;
 
+        // Приседание замедляет
+        let horiz_vel = if shift { horiz_vel * 0.5 } else { horiz_vel };
+
         // Гравитация
         player.velocity.y -= GRAVITY * dt;
         if player.velocity.y < -55.0 {
             player.velocity.y = -55.0;
         }
 
-        // Присесть (замедляет, не критично)
-        let horiz_vel = if shift { horiz_vel * 0.4 } else { horiz_vel };
-
-        // Пошаговое движение по осям
         let pos = transform.translation;
 
         let new_x = pos.x + horiz_vel.x * dt;
@@ -185,7 +175,6 @@ fn player_movement(
             player.velocity.y = 0.0;
         }
 
-        // Прыжок
         if keys.just_pressed(KeyCode::Space) && player.on_ground {
             player.velocity.y = JUMP_VELOCITY;
             player.on_ground = false;

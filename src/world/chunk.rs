@@ -4,7 +4,7 @@ use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::Face;
-use crate::core::state::{SX, SY, SZ};
+use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
 
 // ============================================================
 // БЛОКИ
@@ -112,6 +112,31 @@ impl WorldData {
             }
         }
         -1
+    }
+}
+
+// ============================================================
+// СПИСОК ЧАНКОВ НА ПЕРЕСТРОЙКУ
+// ============================================================
+#[derive(Resource, Default)]
+pub struct DirtyChunks(pub Vec<IVec2>);
+
+impl DirtyChunks {
+    pub fn mark(&mut self, x: i32, z: i32) {
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let lx = x.rem_euclid(CHUNK_SIZE);
+        let lz = z.rem_euclid(CHUNK_SIZE);
+
+        self.0.push(IVec2::new(cx, cz));
+        if lx == 0 { self.0.push(IVec2::new(cx - 1, cz)); }
+        if lx == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx + 1, cz)); }
+        if lz == 0 { self.0.push(IVec2::new(cx, cz - 1)); }
+        if lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx, cz + 1)); }
+        if lx == 0 && lz == 0 { self.0.push(IVec2::new(cx - 1, cz - 1)); }
+        if lx == 0 && lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx - 1, cz + 1)); }
+        if lx == CHUNK_SIZE - 1 && lz == 0 { self.0.push(IVec2::new(cx + 1, cz - 1)); }
+        if lx == CHUNK_SIZE - 1 && lz == CHUNK_SIZE - 1 { self.0.push(IVec2::new(cx + 1, cz + 1)); }
     }
 }
 
@@ -280,14 +305,14 @@ fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
 
     let u0 = tc / cols;
     let u1 = (tc + 1.0) / cols;
-    let v_top_of_tile = tr / rows;
-    let v_bot_of_tile = (tr + 1.0) / rows;
+    let v_top = tr / rows;
+    let v_bot = (tr + 1.0) / rows;
 
     [
-        [u0, v_bot_of_tile],
-        [u1, v_bot_of_tile],
-        [u1, v_top_of_tile],
-        [u0, v_top_of_tile],
+        [u0, v_bot],
+        [u1, v_bot],
+        [u1, v_top],
+        [u0, v_top],
     ]
 }
 
@@ -303,15 +328,18 @@ const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
     ([0, 0, -1], [[1.0,0.0,0.0],[0.0,0.0,0.0],[0.0,1.0,0.0],[1.0,1.0,0.0]]),
 ];
 
-pub fn build_world_mesh(world: &WorldData) -> Mesh {
+pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut normals:   Vec<[f32; 3]> = Vec::new();
     let mut uvs:       Vec<[f32; 2]> = Vec::new();
     let mut indices:   Vec<u32>      = Vec::new();
 
+    let x_start = cx * CHUNK_SIZE;
+    let z_start = cz * CHUNK_SIZE;
+
     for y in 0..SY {
-        for z in 0..SZ {
-            for x in 0..SX {
+        for z in z_start..(z_start + CHUNK_SIZE) {
+            for x in x_start..(x_start + CHUNK_SIZE) {
                 let block = world.get(x, y, z);
                 if !block.is_solid() { continue; }
 
@@ -358,31 +386,39 @@ pub fn build_world_mesh(world: &WorldData) -> Mesh {
 }
 
 // ============================================================
+// КОМПОНЕНТ ЧАНКА
+// ============================================================
+#[derive(Component)]
+pub struct ChunkMesh {
+    pub coord: IVec2,
+}
+
+// ============================================================
 // ПЛАГИН
 // ============================================================
 pub struct ChunkPlugin;
 
 impl Plugin for ChunkPlugin {
     fn build(&self, app: &mut App) {
-        // Ambient мягкий, чтобы не было чёрных теней
         app.insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 350.0,
         })
         .insert_resource(WorldData::new())
-        .add_systems(PostStartup, spawn_world_mesh);
+        .init_resource::<DirtyChunks>()
+        .add_systems(PostStartup, spawn_all_chunks)
+        .add_systems(Update, rebuild_dirty_chunks);
         info!("ChunkPlugin loaded.");
     }
 }
 
-fn spawn_world_mesh(
+fn spawn_all_chunks(
     mut commands: Commands,
     world: Res<WorldData>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    // --- Атлас ---
     info!("Generating atlas...");
     let t_atlas = std::time::Instant::now();
 
@@ -403,34 +439,44 @@ fn spawn_world_mesh(
 
     info!("Atlas generated in {:?}", t_atlas.elapsed());
 
-    // --- Меш ---
-    info!("Building world mesh...");
-    let t0 = std::time::Instant::now();
-
-    let mesh = build_world_mesh(&world);
-    let vertex_count = mesh.count_vertices();
-    let handle = meshes.add(mesh);
-
-    // --- Материал: LIT (с освещением) ---
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(atlas_handle),
-        unlit: false,               // ← освещение включено
+        unlit: false,
         cull_mode: Some(Face::Back),
         perceptual_roughness: 1.0,
         metallic: 0.0,
         ..default()
     });
 
-    commands.spawn((
-        Mesh3d(handle),
-        MeshMaterial3d(material),
-        Transform::default(),
-        Name::new("WorldMesh"),
-    ));
+    info!("Building chunk meshes...");
+    let t0 = std::time::Instant::now();
+    let chunks_x = SX / CHUNK_SIZE;
+    let chunks_z = SZ / CHUNK_SIZE;
+    let mut total_vertices = 0usize;
 
-    // --- Направленный свет (солнце) ---
-    // Светит под углом сверху-с-боку, чтобы разные грани освещались по-разному
+    for cx in 0..chunks_x {
+        for cz in 0..chunks_z {
+            let mesh = build_chunk_mesh(&world, cx, cz);
+            total_vertices += mesh.count_vertices();
+            let handle = meshes.add(mesh);
+            commands.spawn((
+                Mesh3d(handle),
+                MeshMaterial3d(material.clone()),
+                Transform::default(),
+                ChunkMesh { coord: IVec2::new(cx, cz) },
+                Name::new(format!("Chunk({}, {})", cx, cz)),
+            ));
+        }
+    }
+
+    info!(
+        "All {} chunks built in {:?}: {} vertices total",
+        chunks_x * chunks_z,
+        t0.elapsed(),
+        total_vertices
+    );
+
     commands.spawn((
         DirectionalLight {
             illuminance: 10000.0,
@@ -439,15 +485,38 @@ fn spawn_world_mesh(
         },
         Transform::from_rotation(Quat::from_euler(
             EulerRot::YXZ,
-            -0.9,   // pitch
-            -0.5,   // yaw
+            -0.9,
+            -0.5,
             0.0,
         )),
     ));
+}
 
-    info!(
-        "World mesh built in {:?}: {} vertices",
-        t0.elapsed(),
-        vertex_count
-    );
+fn rebuild_dirty_chunks(
+    world: Res<WorldData>,          // ← убран mut
+    mut dirty: ResMut<DirtyChunks>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut chunk_q: Query<(&ChunkMesh, &mut Mesh3d)>,
+) {
+    if dirty.0.is_empty() { return; }
+
+    dirty.0.sort_by_key(|c| (c.x, c.y));
+    dirty.0.dedup();
+
+    let coords: Vec<IVec2> = dirty.0.drain(..).collect();
+
+    for coord in coords {
+        if coord.x < 0 || coord.x >= (SX / CHUNK_SIZE) { continue; }
+        if coord.y < 0 || coord.y >= (SZ / CHUNK_SIZE) { continue; }
+
+        let new_mesh = build_chunk_mesh(&world, coord.x, coord.y);
+        let new_handle = meshes.add(new_mesh);
+
+        for (chunk, mut mesh3d) in chunk_q.iter_mut() {
+            if chunk.coord == coord {
+                mesh3d.0 = new_handle.clone();
+                break;
+            }
+        }
+    }
 }
