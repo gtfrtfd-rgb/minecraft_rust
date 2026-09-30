@@ -1,6 +1,6 @@
 [package]
 name = "minecraft_rust"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
@@ -8,7 +8,6 @@ bevy = "0.15"
 noise = "0.9"
 rand = "0.8"
 
-# Оптимизации для быстрой отладки
 [profile.dev]
 opt-level = 1
 

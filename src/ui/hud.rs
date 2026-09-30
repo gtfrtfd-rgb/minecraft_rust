@@ -1,15 +1,21 @@
 use bevy::prelude::*;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use crate::player::controller::Player;
+use crate::GAME_VERSION;
 
 #[derive(Component)]
 struct CoordsText;
+
+#[derive(Component)]
+struct FpsText;
 
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_hud)
-           .add_systems(Update, update_coords);
+        app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+           .add_systems(Startup, setup_hud)
+           .add_systems(Update, (update_coords, update_fps));
         info!("HudPlugin loaded.");
     }
 }
@@ -62,26 +68,50 @@ fn setup_hud(mut commands: Commands) {
         ));
     });
 
-    // ---- Координаты (левый верхний угол) ----
-    commands.spawn((
-        Text::new("XYZ: 0 / 0 / 0"),
-        TextFont {
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            top: Val::Px(10.0),
-            ..default()
-        },
-        CoordsText,
-    ));
+    // ---- Левый верхний угол: координаты + FPS + версия ----
+    commands.spawn(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(12.0),
+        top: Val::Px(10.0),
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(2.0),
+        ..default()
+    })
+    .with_children(|parent| {
+        // Координаты
+        parent.spawn((
+            Text::new("XYZ: 0.0 / 0.0 / 0.0"),
+            TextFont {
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            CoordsText,
+        ));
 
-    // ---- Подсказки (правый верхний угол) ----
-    // Bevy default_font (FiraMono) не содержит кириллицу,
-    // поэтому подсказки на латинице.
+        // FPS
+        parent.spawn((
+            Text::new("FPS: --"),
+            TextFont {
+                font_size: 18.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.85, 0.95, 0.65)),
+            FpsText,
+        ));
+
+        // Версия (берётся из Cargo.toml автоматически)
+        parent.spawn((
+            Text::new(format!("Minecraft Rust v{}", GAME_VERSION)),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
+        ));
+    });
+
+    // ---- Правый верхний угол: подсказки ----
     commands.spawn((
         Text::new(
             "WASD / Arrows - move\n\
@@ -116,5 +146,21 @@ fn update_coords(
             "XYZ: {:.1} / {:.1} / {:.1}",
             pos.x, pos.y, pos.z
         );
+    }
+}
+
+fn update_fps(
+    diagnostics: Res<DiagnosticsStore>,
+    mut text_q: Query<&mut Text, With<FpsText>>,
+) {
+    let Some(fps_diag) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS) else {
+        return;
+    };
+    let Some(value) = fps_diag.smoothed() else {
+        return;
+    };
+
+    for mut text in text_q.iter_mut() {
+        text.0 = format!("FPS: {:.0}", value);
     }
 }

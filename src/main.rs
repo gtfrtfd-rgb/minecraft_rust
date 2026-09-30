@@ -17,11 +17,15 @@ use mobs::MobPlugin;
 use ui::UiPlugin;
 use save::SavePlugin;
 
+/// Версия берётся из Cargo.toml (version = "0.2.0").
+/// Меняешь только там — обновится везде.
+pub const GAME_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "Minecraft Rust — v0.1".into(),
+                title: format!("Minecraft Rust — v{}", GAME_VERSION),
                 resolution: (1280.0_f32, 720.0_f32).into(),
                 cursor_options: CursorOptions {
                     visible: false,
