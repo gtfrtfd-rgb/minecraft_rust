@@ -5,7 +5,12 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15"
-bevy_voxel_world = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+noise = "0.9"
 rand = "0.8"
+
+# Оптимизации для быстрой отладки
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

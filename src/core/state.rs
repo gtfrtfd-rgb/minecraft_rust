@@ -8,7 +8,6 @@ pub const CHUNK_SIZE: i32 = 16;
 #[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum AppState {
     #[default]
-    Menu,
     InGame,
 }
 
@@ -20,7 +19,8 @@ pub struct GameStatePlugin;
 impl Plugin for GameStatePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
-           .insert_resource(WorldSeed(rand::random()));
+            .insert_resource(WorldSeed(rand::random()))
+            .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)));
         info!("Core GameStatePlugin loaded.");
     }
 }

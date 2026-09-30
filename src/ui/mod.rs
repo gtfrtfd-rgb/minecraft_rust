@@ -7,10 +7,7 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            hotbar::HotbarPlugin,
-            hud::HudPlugin,
-        ));
+        app.add_plugins((hotbar::HotbarPlugin, hud::HudPlugin));
         info!("UiPlugin loaded.");
     }
 }

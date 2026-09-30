@@ -7,23 +7,32 @@ mod ui;
 mod save;
 
 use bevy::prelude::*;
+use core::state::GameStatePlugin;
+use world::WorldPlugin;
+use player::PlayerPlugin;
+use interaction::InteractionPlugin;
+use mobs::MobPlugin;
+use ui::UiPlugin;
+use save::SavePlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        // --- Ядро ---
-        .add_plugins(core::state::GameStatePlugin)
-        // --- Мир и чанки ---
-        .add_plugins(world::WorldPlugin)
-        // --- Игрок ---
-        .add_plugins(player::PlayerPlugin)
-        // --- Взаимодействие (рейкаст, ломание/установка) ---
-        .add_plugins(interaction::InteractionPlugin)
-        // --- Мобы ---
-        .add_plugins(mobs::MobPlugin)
-        // --- Интерфейс ---
-        .add_plugins(ui::UiPlugin)
-        // --- Сохранения ---
-        .add_plugins(save::SavePlugin)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Minecraft Rust — v0.1".into(),
+                resolution: (1280.0, 720.0).into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_plugins((
+            GameStatePlugin,
+            WorldPlugin,
+            PlayerPlugin,
+            InteractionPlugin,
+            MobPlugin,
+            UiPlugin,
+            SavePlugin,
+        ))
         .run();
 }

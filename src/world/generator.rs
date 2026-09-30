@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
-use super::chunk::{Chunk, BlockType};
-use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
+use super::chunk::{BlockType, Chunk};
+use crate::core::state::{WorldSeed, SX, SZ, SY, CHUNK_SIZE};
 
 pub struct WorldGeneratorPlugin;
 
@@ -11,21 +11,20 @@ impl Plugin for WorldGeneratorPlugin {
     }
 }
 
-fn generate_terrain(
-    mut commands: Commands,
-    seed: Res<crate::core::state::WorldSeed>,
-) {
+fn generate_terrain(mut commands: Commands, seed: Res<WorldSeed>) {
     let perlin = Perlin::new(seed.0);
+    let mut chunk_count = 0;
+
     for cx in 0..(SX / CHUNK_SIZE) {
         for cz in 0..(SZ / CHUNK_SIZE) {
             let mut chunk = Chunk::new(cx, cz);
             for x in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    let world_x = cx * CHUNK_SIZE + x;
-                    let world_z = cz * CHUNK_SIZE + z;
-                    let noise_val = perlin.get([world_x as f64 / 64.0, world_z as f64 / 64.0]);
-                    let height = (noise_val * 16.0 + 16.0) as i32;
-                    for y in 0..height.min(SY) {
+                    let wx = (cx * CHUNK_SIZE + x) as f64;
+                    let wz = (cz * CHUNK_SIZE + z) as f64;
+                    let n = perlin.get([wx / 64.0, wz / 64.0]);
+                    let height = ((n * 16.0 + 16.0) as i32).clamp(3, SY - 5);
+                    for y in 0..height {
                         let block = match y {
                             0..=2 => BlockType::Stone,
                             _ if y == height - 1 => BlockType::Grass,
@@ -36,7 +35,8 @@ fn generate_terrain(
                 }
             }
             commands.spawn(chunk);
+            chunk_count += 1;
         }
     }
-    info!("Terrain generation finished.");
+    info!("Generated {} chunks", chunk_count);
 }
