@@ -23,7 +23,6 @@ pub struct PlayerLook {
     pub pitch: f32,
 }
 
-/// 9 блоков в хотбаре
 pub const HOTBAR: [BlockType; 9] = [
     BlockType::Grass,
     BlockType::Dirt,
@@ -68,10 +67,8 @@ fn handle_slot_input(
 
     for ev in wheel.read() {
         if ev.y > 0.0 {
-            // Колесо вверх — назад по слотам
             selected.0 = (selected.0 + HOTBAR.len() - 1) % HOTBAR.len();
         } else if ev.y < 0.0 {
-            // Колесо вниз — вперёд
             selected.0 = (selected.0 + 1) % HOTBAR.len();
         }
     }

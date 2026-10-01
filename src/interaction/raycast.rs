@@ -45,10 +45,17 @@ fn draw_target_highlight(
     cam_q: Query<&Transform, With<PlayerCamera>>,
 ) {
     let Some(hit) = target.hit else { return; };
+
+    // Не рисуем рамку для блоков вне игровой зоны
+    if !WorldData::in_bounds(hit.block.x, hit.block.y, hit.block.z) {
+        return;
+    }
+    if hit.block.y <= 0 {
+        return;
+    }
+
     let Ok(cam_tf) = cam_q.get_single() else { return; };
 
-    // Не рисуем подсветку, если блок ближе 2.5м —
-    // иначе его рёбра растянутся на пол-экрана.
     let bmin = hit.block.as_vec3();
     let bmax = bmin + Vec3::ONE;
     let p = cam_tf.translation;
@@ -93,7 +100,8 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     let mut normal = IVec3::ZERO;
 
     for _ in 0..256 {
-        if world.is_solid(x, y, z) {
+        // Только реальные блоки (без невидимых барьеров за границей)
+        if WorldData::in_bounds(x, y, z) && world.get(x, y, z).is_solid() {
             return Some(TargetHit {
                 block: IVec3::new(x, y, z),
                 normal,

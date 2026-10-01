@@ -3,13 +3,14 @@ use bevy::asset::RenderAssetUsages;
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
+use bevy::render::render_resource::Face;
 use bevy::render::view::NoFrustumCulling;
 use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
 
-#[allow(dead_code)]
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlockType {
-    Air,
+    Air = 0,
     Grass,
     Dirt,
     Stone,
@@ -28,6 +29,29 @@ impl BlockType {
     #[inline]
     pub fn is_solid(self) -> bool {
         !matches!(self, BlockType::Air)
+    }
+
+    #[inline]
+    pub fn to_u8(self) -> u8 { self as u8 }
+
+    #[inline]
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            0 => BlockType::Air,
+            1 => BlockType::Grass,
+            2 => BlockType::Dirt,
+            3 => BlockType::Stone,
+            4 => BlockType::Cobblestone,
+            5 => BlockType::Sand,
+            6 => BlockType::Log,
+            7 => BlockType::Leaves,
+            8 => BlockType::Planks,
+            9 => BlockType::Brick,
+            10 => BlockType::Glass,
+            11 => BlockType::Snow,
+            12 => BlockType::Obsidian,
+            _ => BlockType::Air,
+        }
     }
 
     #[inline]
@@ -139,11 +163,14 @@ impl WorldData {
         }
     }
 
+    /// Невидимый барьер: за границами X/Z возвращает true.
+    /// Физически не пускает игрока, визуально ничего не видно.
     #[inline]
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
         if y < 0 { return true; }
         if y >= SY { return false; }
-        if !Self::in_bounds(x, y, z) { return false; }
+        if x < 0 || x >= SX { return true; }  // невидимая стена по X
+        if z < 0 || z >= SZ { return true; }  // невидимая стена по Z
         self.get(x, y, z).is_solid()
     }
 
@@ -230,15 +257,15 @@ fn make_atlas() -> Vec<u8> {
 
     draw_tile(&mut data, w, 0, 1, |x, y, s| {
         let n = hash(x, y, s);
-        let base = (0.30 + n * 0.15) * 255.0;
-        [(base * 0.55) as u8, base as u8, (base * 0.30) as u8, 255]
+        let base = (0.32 + n * 0.14) * 255.0;
+        [(base * 0.50) as u8, base as u8, (base * 0.28) as u8, 255]
     });
     draw_tile(&mut data, w, 1, 2, |x, y, s| {
         let n = hash(x, y, s);
         let edge = 3 + (hash(x, 0, s + 7) * 2.0) as u32;
         if y < edge {
-            let base = (0.30 + n * 0.15) * 255.0;
-            [(base * 0.55) as u8, base as u8, (base * 0.3) as u8, 255]
+            let base = (0.32 + n * 0.14) * 255.0;
+            [(base * 0.50) as u8, base as u8, (base * 0.28) as u8, 255]
         } else {
             let base = (0.45 + n * 0.12) * 255.0;
             [base as u8, (base * 0.70) as u8, (base * 0.45) as u8, 255]
@@ -284,10 +311,10 @@ fn make_atlas() -> Vec<u8> {
     });
     draw_tile(&mut data, w, 8, 9, |x, y, s| {
         let n = hash(x, y, s);
-        let dark = if n < 0.2 { -0.15 } else { 0.0 };
-        let base = (0.22 + n * 0.15 + dark).clamp(0.0, 1.0) * 255.0;
+        let dark = if n < 0.35 { -0.10 } else { 0.0 };
+        let base = (0.18 + n * 0.18 + dark).clamp(0.0, 1.0) * 255.0;
         let base = base as u8;
-        [base, ((base as f32) * 2.2).min(255.0) as u8, base, 255]
+        [base, ((base as f32) * 1.7).min(255.0) as u8, base, 255]
     });
     draw_tile(&mut data, w, 9, 10, |x, y, s| {
         let n = hash(x, y, s);
@@ -329,10 +356,11 @@ fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
     let tr = (tile / ATLAS_COLS) as f32;
     let cols = ATLAS_COLS as f32;
     let rows = ATLAS_ROWS as f32;
-    let u0 = tc / cols;
-    let u1 = (tc + 1.0) / cols;
-    let v_top = tr / rows;
-    let v_bot = (tr + 1.0) / rows;
+    let pad = 0.5 / (ATLAS_TILE * ATLAS_COLS) as f32;
+    let u0 = tc / cols + pad;
+    let u1 = (tc + 1.0) / cols - pad;
+    let v_top = tr / rows + pad;
+    let v_bot = (tr + 1.0) / rows - pad;
     [[u0, v_bot], [u1, v_bot], [u1, v_top], [u0, v_top]]
 }
 
@@ -445,7 +473,7 @@ fn spawn_all_chunks(
         base_color: Color::WHITE,
         base_color_texture: Some(atlas_handle),
         unlit: false,
-        cull_mode: None,   // double-sided: чтобы видеть нижние грани
+        cull_mode: Some(Face::Back),
         perceptual_roughness: 1.0,
         metallic: 0.0,
         ..default()
@@ -463,10 +491,6 @@ fn spawn_all_chunks(
             total_vertices += mesh.count_vertices();
             let handle = meshes.add(mesh);
 
-            // ВАЖНО: NoFrustumCulling — иначе Bevy неправильно отсеивает
-            // чанки, потому что их меши строятся в мировых координатах,
-            // а Transform = (0,0,0). Без этого чанки могут "пропадать",
-            // когда игрок поворачивает камеру.
             commands.spawn((
                 Mesh3d(handle),
                 MeshMaterial3d(material.clone()),

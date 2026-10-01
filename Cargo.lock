@@ -2736,11 +2736,13 @@ dependencies = [
 
 [[package]]
 name = "minecraft_rust"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "bevy",
  "noise",
  "rand",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

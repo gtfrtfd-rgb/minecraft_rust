@@ -17,8 +17,6 @@ use mobs::MobPlugin;
 use ui::UiPlugin;
 use save::SavePlugin;
 
-/// Версия берётся из Cargo.toml (version = "0.2.0").
-/// Меняешь только там — обновится везде.
 pub const GAME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
@@ -38,20 +36,17 @@ fn main() {
         }))
         .add_plugins((
             GameStatePlugin,
-            WorldPlugin,
-            PlayerPlugin,
+            SavePlugin,      // PreStartup: загрузка сохранения
+            WorldPlugin,     // Startup: load_or_generate, PostStartup: chunk meshes
+            PlayerPlugin,    // Startup: spawn_player + apply_loaded_state
             InteractionPlugin,
             MobPlugin,
             UiPlugin,
-            SavePlugin,
         ))
-        // ВРЕМЕННО: выход по Escape
         .add_systems(Update, exit_on_escape)
         .run();
 }
 
-/// ВРЕМЕННО: выход из игры по Escape.
-/// Убрать после того, как появится нормальное меню паузы.
 fn exit_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
     mut exit: EventWriter<AppExit>,
