@@ -4,6 +4,11 @@ use crate::player::camera::PlayerCamera;
 
 pub const REACH_DISTANCE: f32 = 5.0;
 
+/// Насколько близко к блоку должна быть камера,
+/// чтобы перестать рисовать рамку. 0.5м — блок буквально
+/// внутри тебя, дальше уже видно нормально.
+const HIGHLIGHT_MIN_DIST: f32 = 0.5;
+
 #[derive(Debug, Clone, Copy)]
 pub struct TargetHit {
     pub block: IVec3,
@@ -46,7 +51,7 @@ fn draw_target_highlight(
 ) {
     let Some(hit) = target.hit else { return; };
 
-    // Не рисуем рамку для блоков вне игровой зоны
+    // Не рисуем рамку для блоков вне игровой зоны (невидимые стены)
     if !WorldData::in_bounds(hit.block.x, hit.block.y, hit.block.z) {
         return;
     }
@@ -56,11 +61,12 @@ fn draw_target_highlight(
 
     let Ok(cam_tf) = cam_q.get_single() else { return; };
 
+    // Расстояние до БЛИЖАЙШЕЙ точки AABB блока
     let bmin = hit.block.as_vec3();
     let bmax = bmin + Vec3::ONE;
     let p = cam_tf.translation;
     let nearest = p.clamp(bmin, bmax);
-    if (nearest - p).length() < 2.5 {
+    if (nearest - p).length() < HIGHLIGHT_MIN_DIST {
         return;
     }
 
@@ -100,7 +106,7 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     let mut normal = IVec3::ZERO;
 
     for _ in 0..256 {
-        // Только реальные блоки (без невидимых барьеров за границей)
+        // Реальные блоки (без невидимых барьеров за границей)
         if WorldData::in_bounds(x, y, z) && world.get(x, y, z).is_solid() {
             return Some(TargetHit {
                 block: IVec3::new(x, y, z),

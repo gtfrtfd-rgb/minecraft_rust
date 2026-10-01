@@ -12,11 +12,21 @@ const SPRINT_SPEED: f32 = 9.5;
 const FLY_SPEED: f32 = 15.0;
 const FLY_SPEED_FAST: f32 = 30.0;
 
+/// Буфер прыжка: если игрок нажал Space за 150мс до приземления,
+/// прыжок сработает сразу при касании земли.
+const JUMP_BUFFER: f32 = 0.15;
+
+/// Coyote time: если игрок только что сошёл с платформы
+/// (в пределах 100мс), прыжок ещё разрешён.
+const COYOTE_TIME: f32 = 0.10;
+
 #[derive(Component)]
 pub struct Player {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub fly: bool,
+    pub jump_buffer: f32,
+    pub coyote_timer: f32,
 }
 
 pub struct PlayerControllerPlugin;
@@ -35,6 +45,8 @@ fn spawn_player(mut commands: Commands) {
             velocity: Vec3::ZERO,
             on_ground: false,
             fly: false,
+            jump_buffer: 0.0,
+            coyote_timer: 0.0,
         },
         Transform::from_xyz(128.0, 60.0, 128.0),
         Visibility::default(),
@@ -42,7 +54,6 @@ fn spawn_player(mut commands: Commands) {
     ));
 }
 
-/// Если есть сохранение — ставим игрока на сохранённую позицию
 fn apply_loaded_state(
     loaded: Res<LoadedSave>,
     mut player_q: Query<(&mut Transform, &mut Player)>,
@@ -108,6 +119,12 @@ fn player_movement(
     let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
     let right   = Vec3::new( yaw.cos(), 0.0, -yaw.sin());
 
+    // === ЗАЖАТЫЙ SPACE = АВТОПРЫЖОК ===
+    // Используем .pressed() вместо .just_pressed():
+    // пока Space зажат, буфер постоянно обновляется,
+    // и как только игрок касается земли — сразу новый прыжок.
+    let space_held = keys.pressed(KeyCode::Space);
+
     for (mut transform, mut player) in player_q.iter_mut() {
         let mut dir = Vec3::ZERO;
 
@@ -131,10 +148,20 @@ fn player_movement(
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
         let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
+        // Обновляем буфер прыжка если Space зажат
+        if space_held {
+            player.jump_buffer = JUMP_BUFFER;
+        }
+        if player.jump_buffer > 0.0 {
+            player.jump_buffer -= dt;
+            if player.jump_buffer < 0.0 { player.jump_buffer = 0.0; }
+        }
+
+        // === ПОЛЁТ ===
         if player.fly {
             let speed = if ctrl { FLY_SPEED_FAST } else { FLY_SPEED };
             let mut vel = dir * speed;
-            if keys.pressed(KeyCode::Space) { vel.y += speed; }
+            if space_held { vel.y += speed; }
             if shift { vel.y -= speed; }
             player.velocity = vel;
 
@@ -156,6 +183,7 @@ fn player_movement(
             continue;
         }
 
+        // === ХОДЬБА ===
         let speed = if ctrl { SPRINT_SPEED } else { WALK_SPEED };
         let horiz_vel = dir * speed;
         let horiz_vel = if shift { horiz_vel * 0.5 } else { horiz_vel };
@@ -166,14 +194,18 @@ fn player_movement(
         }
 
         let pos = transform.translation;
+
         let new_x = pos.x + horiz_vel.x * dt;
         if !collides(&world, new_x, pos.y, pos.z) {
             transform.translation.x = new_x;
         }
+
         let new_z = pos.z + horiz_vel.z * dt;
         if !collides(&world, transform.translation.x, pos.y, new_z) {
             transform.translation.z = new_z;
         }
+
+        let was_on_ground = player.on_ground;
         let new_y = pos.y + player.velocity.y * dt;
         if !collides(&world, transform.translation.x, new_y, transform.translation.z) {
             transform.translation.y = new_y;
@@ -185,9 +217,21 @@ fn player_movement(
             player.velocity.y = 0.0;
         }
 
-        if keys.just_pressed(KeyCode::Space) && player.on_ground {
+        if player.on_ground {
+            player.coyote_timer = COYOTE_TIME;
+        } else {
+            if !was_on_ground {
+                player.coyote_timer = (player.coyote_timer - dt).max(0.0);
+            }
+        }
+
+        // === ПРЫЖОК ===
+        let can_jump = player.on_ground || player.coyote_timer > 0.0;
+        if player.jump_buffer > 0.0 && can_jump {
             player.velocity.y = JUMP_VELOCITY;
             player.on_ground = false;
+            player.jump_buffer = 0.0;
+            player.coyote_timer = 0.0;
         }
     }
 }
