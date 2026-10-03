@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseMotion;
 use bevy::pbr::{DistanceFog, FogFalloff};
-use crate::core::state::PlayerLook;
+use crate::core::state::{AppState, PlayerLook};
 use super::controller::Player;
 
 #[derive(Component)]
@@ -12,22 +12,24 @@ pub struct PlayerCameraPlugin;
 impl Plugin for PlayerCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_camera)
-           .add_systems(Update, camera_follow_and_look);
+            // Слежение и обзор — только в игре
+            .add_systems(
+                Update,
+                camera_follow_and_look.run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
 fn setup_camera(mut commands: Commands) {
-    // Цвет тумана = цвет неба (ClearColor из GameStatePlugin).
-    // Дальние блоки растворяются в нём, скрывая границу мира.
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(128.0, 62.0, 128.0)
-            .looking_at(Vec3::new(128.0, 30.0, 100.0), Vec3::Y),
+        Transform::from_xyz(128.0, 42.0, 128.0)
+            .looking_at(Vec3::new(128.0, 20.0, 100.0), Vec3::Y),
         DistanceFog {
-            color: Color::srgb(0.53, 0.81, 0.92),  // тот же, что ClearColor
+            color: Color::srgb(0.53, 0.81, 0.92),
             falloff: FogFalloff::Linear {
-                start: 40.0,   // туман начинается с 40 блоков
-                end:   90.0,   // полностью затуманено к 90
+                start: 40.0,
+                end: 90.0,
             },
             ..default()
         },

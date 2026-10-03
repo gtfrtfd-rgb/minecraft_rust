@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::core::state::{HOTBAR, SelectedSlot};
+use crate::core::state::{AppState, HOTBAR, SelectedSlot};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
 use super::raycast::TargetBlock;
@@ -8,12 +8,14 @@ pub struct BreakingPlugin;
 
 impl Plugin for BreakingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (handle_break, handle_place));
+        app.add_systems(
+            Update,
+            (handle_break, handle_place).run_if(in_state(AppState::InGame)),
+        );
         info!("BreakingPlugin loaded.");
     }
 }
 
-/// ЛКМ — сломать блок под прицелом (можно копать и под собой)
 fn handle_break(
     mouse: Res<ButtonInput<MouseButton>>,
     target: Res<TargetBlock>,
@@ -25,7 +27,6 @@ fn handle_break(
     }
     let Some(hit) = target.hit else { return; };
 
-    // Y=0 — bedrock, не копается
     if hit.block.y <= 0 {
         return;
     }
@@ -39,7 +40,6 @@ fn handle_break(
     dirty.mark(hit.block.x, hit.block.z);
 }
 
-/// ПКМ — поставить блок из выбранного слота
 fn handle_place(
     mouse: Res<ButtonInput<MouseButton>>,
     target: Res<TargetBlock>,
@@ -65,7 +65,6 @@ fn handle_place(
         return;
     }
 
-    // Нельзя ставить блок внутрь себя
     if let Ok(player_tf) = player_q.get_single() {
         if block_intersects_player(pos, player_tf.translation) {
             return;
@@ -77,7 +76,6 @@ fn handle_place(
     dirty.mark(pos.x, pos.z);
 }
 
-/// Пересекается ли блок (x,y,z) с AABB игрока (для ПКМ)
 fn block_intersects_player(block: IVec3, player_pos: Vec3) -> bool {
     const PR: f32 = 0.3;
     const PH: f32 = 1.8;

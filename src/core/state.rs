@@ -8,10 +8,15 @@ pub const SZ: i32 = 256;
 
 pub const CHUNK_SIZE: i32 = 16;
 
+// ============================================================
+// СОСТОЯНИЯ ИГРЫ
+// ============================================================
 #[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum AppState {
     #[default]
-    InGame,
+    Menu,      // Главное меню — курсор видим, игра на паузе
+    InGame,    // Активная игра — курсор захвачен
+    Paused,    // Пауза — курсор видим, игра заморожена
 }
 
 #[derive(Resource)]
@@ -47,7 +52,7 @@ impl Plugin for GameStatePlugin {
             .init_resource::<SelectedSlot>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
-            .add_systems(Update, handle_slot_input);
+            .add_systems(Update, handle_slot_input.run_if(in_state(AppState::InGame)));
         info!("Core GameStatePlugin loaded.");
     }
 }

@@ -7,7 +7,6 @@ mod ui;
 mod save;
 
 use bevy::prelude::*;
-use bevy::app::AppExit;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use core::state::GameStatePlugin;
 use world::WorldPlugin;
@@ -25,9 +24,10 @@ fn main() {
             primary_window: Some(Window {
                 title: format!("Minecraft Rust — v{}", GAME_VERSION),
                 resolution: (1280.0_f32, 720.0_f32).into(),
+                // При старте — Menu. Курсор видим, не захвачен.
                 cursor_options: CursorOptions {
-                    visible: false,
-                    grab_mode: CursorGrabMode::Confined,
+                    visible: true,
+                    grab_mode: CursorGrabMode::None,
                     ..default()
                 },
                 ..default()
@@ -36,23 +36,12 @@ fn main() {
         }))
         .add_plugins((
             GameStatePlugin,
-            SavePlugin,      // PreStartup: загрузка сохранения
-            WorldPlugin,     // Startup: load_or_generate, PostStartup: chunk meshes
-            PlayerPlugin,    // Startup: spawn_player + apply_loaded_state
+            SavePlugin,
+            WorldPlugin,
+            PlayerPlugin,
             InteractionPlugin,
             MobPlugin,
             UiPlugin,
         ))
-        .add_systems(Update, exit_on_escape)
         .run();
-}
-
-fn exit_on_escape(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut exit: EventWriter<AppExit>,
-) {
-    if keys.just_pressed(KeyCode::Escape) {
-        info!("Escape pressed — exiting...");
-        exit.send(AppExit::Success);
-    }
 }

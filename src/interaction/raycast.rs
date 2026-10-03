@@ -1,12 +1,9 @@
 use bevy::prelude::*;
+use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
 use crate::player::camera::PlayerCamera;
 
 pub const REACH_DISTANCE: f32 = 5.0;
-
-/// Насколько близко к блоку должна быть камера,
-/// чтобы перестать рисовать рамку. 0.5м — блок буквально
-/// внутри тебя, дальше уже видно нормально.
 const HIGHLIGHT_MIN_DIST: f32 = 0.5;
 
 #[derive(Debug, Clone, Copy)]
@@ -26,7 +23,10 @@ pub struct RaycastPlugin;
 impl Plugin for RaycastPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetBlock>()
-           .add_systems(Update, (update_target, draw_target_highlight));
+            .add_systems(
+                Update,
+                (update_target, draw_target_highlight).run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
@@ -51,7 +51,6 @@ fn draw_target_highlight(
 ) {
     let Some(hit) = target.hit else { return; };
 
-    // Не рисуем рамку для блоков вне игровой зоны (невидимые стены)
     if !WorldData::in_bounds(hit.block.x, hit.block.y, hit.block.z) {
         return;
     }
@@ -61,7 +60,6 @@ fn draw_target_highlight(
 
     let Ok(cam_tf) = cam_q.get_single() else { return; };
 
-    // Расстояние до БЛИЖАЙШЕЙ точки AABB блока
     let bmin = hit.block.as_vec3();
     let bmax = bmin + Vec3::ONE;
     let p = cam_tf.translation;
@@ -106,7 +104,6 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     let mut normal = IVec3::ZERO;
 
     for _ in 0..256 {
-        // Реальные блоки (без невидимых барьеров за границей)
         if WorldData::in_bounds(x, y, z) && world.get(x, y, z).is_solid() {
             return Some(TargetHit {
                 block: IVec3::new(x, y, z),
@@ -126,18 +123,16 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
                 t_max_z += t_delta_z;
                 normal = IVec3::new(0, 0, -step_z);
             }
+        } else if t_max_y < t_max_z {
+            y += step_y;
+            if t_max_y > max_dist { return None; }
+            t_max_y += t_delta_y;
+            normal = IVec3::new(0, -step_y, 0);
         } else {
-            if t_max_y < t_max_z {
-                y += step_y;
-                if t_max_y > max_dist { return None; }
-                t_max_y += t_delta_y;
-                normal = IVec3::new(0, -step_y, 0);
-            } else {
-                z += step_z;
-                if t_max_z > max_dist { return None; }
-                t_max_z += t_delta_z;
-                normal = IVec3::new(0, 0, -step_z);
-            }
+            z += step_z;
+            if t_max_z > max_dist { return None; }
+            t_max_z += t_delta_z;
+            normal = IVec3::new(0, 0, -step_z);
         }
     }
     None

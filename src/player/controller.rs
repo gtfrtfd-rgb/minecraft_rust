@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::core::state::PlayerLook;
+use crate::core::state::{AppState, PlayerLook};
 use crate::world::chunk::WorldData;
 use crate::save::persistence::LoadedSave;
 
@@ -12,12 +12,7 @@ const SPRINT_SPEED: f32 = 9.5;
 const FLY_SPEED: f32 = 15.0;
 const FLY_SPEED_FAST: f32 = 30.0;
 
-/// Буфер прыжка: если игрок нажал Space за 150мс до приземления,
-/// прыжок сработает сразу при касании земли.
 const JUMP_BUFFER: f32 = 0.15;
-
-/// Coyote time: если игрок только что сошёл с платформы
-/// (в пределах 100мс), прыжок ещё разрешён.
 const COYOTE_TIME: f32 = 0.10;
 
 #[derive(Component)]
@@ -34,8 +29,12 @@ pub struct PlayerControllerPlugin;
 impl Plugin for PlayerControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_player)
-           .add_systems(Startup, apply_loaded_state.after(spawn_player))
-           .add_systems(Update, (player_movement, toggle_fly));
+            .add_systems(Startup, apply_loaded_state.after(spawn_player))
+            // Движение и полёт — только когда играем
+            .add_systems(
+                Update,
+                (player_movement, toggle_fly).run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
@@ -48,7 +47,7 @@ fn spawn_player(mut commands: Commands) {
             jump_buffer: 0.0,
             coyote_timer: 0.0,
         },
-        Transform::from_xyz(128.0, 60.0, 128.0),
+        Transform::from_xyz(128.0, 40.0, 128.0),
         Visibility::default(),
         Name::new("Player"),
     ));
@@ -117,12 +116,8 @@ fn player_movement(
 
     let yaw = look.yaw;
     let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
-    let right   = Vec3::new( yaw.cos(), 0.0, -yaw.sin());
+    let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
 
-    // === ЗАЖАТЫЙ SPACE = АВТОПРЫЖОК ===
-    // Используем .pressed() вместо .just_pressed():
-    // пока Space зажат, буфер постоянно обновляется,
-    // и как только игрок касается земли — сразу новый прыжок.
     let space_held = keys.pressed(KeyCode::Space);
 
     for (mut transform, mut player) in player_q.iter_mut() {
@@ -148,21 +143,25 @@ fn player_movement(
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
         let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
-        // Обновляем буфер прыжка если Space зажат
         if space_held {
             player.jump_buffer = JUMP_BUFFER;
         }
         if player.jump_buffer > 0.0 {
             player.jump_buffer -= dt;
-            if player.jump_buffer < 0.0 { player.jump_buffer = 0.0; }
+            if player.jump_buffer < 0.0 {
+                player.jump_buffer = 0.0;
+            }
         }
 
-        // === ПОЛЁТ ===
         if player.fly {
             let speed = if ctrl { FLY_SPEED_FAST } else { FLY_SPEED };
             let mut vel = dir * speed;
-            if space_held { vel.y += speed; }
-            if shift { vel.y -= speed; }
+            if space_held {
+                vel.y += speed;
+            }
+            if shift {
+                vel.y -= speed;
+            }
             player.velocity = vel;
 
             let pos = transform.translation;
@@ -183,7 +182,6 @@ fn player_movement(
             continue;
         }
 
-        // === ХОДЬБА ===
         let speed = if ctrl { SPRINT_SPEED } else { WALK_SPEED };
         let horiz_vel = dir * speed;
         let horiz_vel = if shift { horiz_vel * 0.5 } else { horiz_vel };
@@ -219,13 +217,10 @@ fn player_movement(
 
         if player.on_ground {
             player.coyote_timer = COYOTE_TIME;
-        } else {
-            if !was_on_ground {
-                player.coyote_timer = (player.coyote_timer - dt).max(0.0);
-            }
+        } else if !was_on_ground {
+            player.coyote_timer = (player.coyote_timer - dt).max(0.0);
         }
 
-        // === ПРЫЖОК ===
         let can_jump = player.on_ground || player.coyote_timer > 0.0;
         if player.jump_buffer > 0.0 && can_jump {
             player.velocity.y = JUMP_VELOCITY;
