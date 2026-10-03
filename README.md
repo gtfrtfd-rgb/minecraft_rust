@@ -1,6 +1,6 @@
 # Minecraft Rust
 
-[![Build](https://github.com/gttrfrd-rgb/minecraft_rust/actions/workflows/build.yml/badge.svg)](https://github.com/gttrfrd-rgb/minecraft_rust/actions/workflows/build.yml)
+[![Build](https://github.com/gtfrtfd-rgb/minecraft_rust/actions/workflows/build.yml/badge.svg)](https://github.com/gtfrtfd-rgb/minecraft_rust/actions/workflows/build.yml)
 
 Воксельная игра в стиле Minecraft, написанная на **Rust** с использованием движка **Bevy**.
 
@@ -32,7 +32,7 @@
 
 ## 📥 Скачать
 
-Готовые сборки публикуются на странице **[Releases](https://github.com/gttrfrd-rgb/minecraft_rust/releases/latest)**.
+Готовые сборки публикуются на странице **[Releases](https://github.com/gtfrtfd-rgb/minecraft_rust/releases/latest)**.
 
 | Платформа | Файл |
 |---|---|
@@ -80,7 +80,7 @@
 
 ### Сборка и запуск
 
-    git clone https://github.com/gttrfrd-rgb/minecraft_rust.git
+    git clone https://github.com/gtfrtfd-rgb/minecraft_rust.git
     cd minecraft_rust
     cargo run --release
 

@@ -92,12 +92,6 @@ jobs:
           path: ${{ env.BIN_NAME }}-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
 
-      # ─────────────────────────────────────────────────────
-      # RELEASE
-      # generate_release_notes только для одной сборки (Windows),
-      # иначе каждый из 4 job'ов перезапишет notes, и в релизе
-      # будет 4 одинаковых "Full Changelog".
-      # ─────────────────────────────────────────────────────
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
