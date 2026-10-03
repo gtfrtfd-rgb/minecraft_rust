@@ -28,8 +28,8 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-          # macOS Intel
-          - os: macos-13
+          # macOS Intel (кросс-компиляция на ARM64-раннере)
+          - os: macos-latest
             target: x86_64-apple-darwin
             archive: tar.gz
           # macOS Apple Silicon
