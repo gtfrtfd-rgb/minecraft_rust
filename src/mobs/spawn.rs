@@ -21,9 +21,6 @@ const INITIAL_MOB_COUNT: usize = 40;
 const MIN_DIST_FROM_PLAYER: f32 = 16.0;
 const SKY_CLEARANCE: i32 = 5;
 
-// ============================================================
-// ВЕРШИНЫ КУБА (6 граней по 4 вершины)
-// ============================================================
 const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([ 1.0, 0.0, 0.0], [[ 1.0,-1.0, 1.0],[ 1.0,-1.0,-1.0],[ 1.0, 1.0,-1.0],[ 1.0, 1.0, 1.0]]),
     ([-1.0, 0.0, 0.0], [[-1.0,-1.0,-1.0],[-1.0,-1.0, 1.0],[-1.0, 1.0, 1.0],[-1.0, 1.0,-1.0]]),
@@ -33,7 +30,6 @@ const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([0.0, 0.0, -1.0], [[ 1.0,-1.0,-1.0],[-1.0,-1.0,-1.0],[-1.0, 1.0,-1.0],[ 1.0, 1.0,-1.0]]),
 ];
 
-/// Добавить куб в буферы меша
 fn push_cube(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
@@ -60,7 +56,6 @@ fn push_cube(
     }
 }
 
-/// Собрать единый меш моба: тело + голова + 4 ноги
 fn build_mob_mesh(mob_type: MobType) -> Mesh {
     let h = mob_type.height();
     let body_size = mob_type.body_size();
@@ -85,7 +80,6 @@ fn build_mob_mesh(mob_type: MobType) -> Mesh {
     let mut colors: Vec<[f32; 4]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    // Тело
     push_cube(
         &mut positions, &mut normals, &mut colors, &mut indices,
         Vec3::new(0.0, h * 0.5, 0.0),
@@ -93,7 +87,6 @@ fn build_mob_mesh(mob_type: MobType) -> Mesh {
         body_color,
     );
 
-    // Голова
     push_cube(
         &mut positions, &mut normals, &mut colors, &mut indices,
         Vec3::new(0.0, head_y, head_offset_z),
@@ -101,7 +94,6 @@ fn build_mob_mesh(mob_type: MobType) -> Mesh {
         body_color,
     );
 
-    // 4 ноги
     let leg_positions = [
         Vec3::new( leg_offset_x, leg_y, -leg_offset_z),
         Vec3::new(-leg_offset_x, leg_y, -leg_offset_z),
@@ -128,9 +120,6 @@ fn build_mob_mesh(mob_type: MobType) -> Mesh {
     mesh
 }
 
-// ============================================================
-// СПАВН
-// ============================================================
 fn spawn_initial_mobs(
     mut commands: Commands,
     world: Res<WorldData>,
@@ -149,13 +138,11 @@ fn spawn_initial_mobs(
     );
     let t0 = std::time::Instant::now();
 
-    // === Один меш на каждый тип моба — кэшируем ===
     let pig_mesh     = meshes.add(build_mob_mesh(MobType::Pig));
     let sheep_mesh   = meshes.add(build_mob_mesh(MobType::Sheep));
     let cow_mesh     = meshes.add(build_mob_mesh(MobType::Cow));
     let chicken_mesh = meshes.add(build_mob_mesh(MobType::Chicken));
 
-    // === Один материал (base_color = WHITE, чтобы работали vertex colors) ===
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         unlit: false,
@@ -228,8 +215,8 @@ fn spawn_initial_mobs(
             MeshMaterial3d(material.clone()),
             Transform::from_translation(
                 Vec3::new(x as f32 + 0.5, spawn_y as f32, z as f32 + 0.5)
-            )
-            .with_rotation(Quat::from_rotation_y(yaw)),
+            ),
+            // ВАЖНО: без .with_rotation — поворот ставится каждый кадр из mob.yaw
             Mob {
                 mob_type,
                 hp: mob_type.max_hp(),
@@ -238,6 +225,7 @@ fn spawn_initial_mobs(
                 on_ground: false,
                 walking: false,
                 wander_timer: 1.0,
+                yaw,
                 target_yaw: yaw,
                 panic_timer: 0.0,
                 hurt_timer: 0.0,

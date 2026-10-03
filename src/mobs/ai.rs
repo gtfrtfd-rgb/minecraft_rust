@@ -110,6 +110,8 @@ pub struct Mob {
     pub on_ground: bool,
     pub walking: bool,
     pub wander_timer: f32,
+    /// Текущий угол (в радианах) — ХРАНИМ ОТДЕЛЬНО от Transform!
+    pub yaw: f32,
     pub target_yaw: f32,
     pub panic_timer: f32,
     pub hurt_timer: f32,
@@ -172,7 +174,7 @@ fn mob_movement_system(
         if mob.hurt_timer > 0.0 { mob.hurt_timer -= dt; }
         if mob.panic_timer > 0.0 { mob.panic_timer -= dt; }
 
-        // Выбор цели
+        // === ВЫБОР ЦЕЛИ ===
         if mob.panic_timer > 0.0 {
             mob.walking = true;
             if rng.gen_bool(0.02) {
@@ -192,20 +194,28 @@ fn mob_movement_system(
             }
         }
 
-        // Плавный поворот
-        let mut dyaw = mob.target_yaw - tf.rotation.y;
+        // === ПЛАВНЫЙ ПОВОРОТ (через НАШУ переменную yaw, не через quat!) ===
+        let mut dyaw = mob.target_yaw - mob.yaw;
         while dyaw > std::f32::consts::PI { dyaw -= std::f32::consts::TAU; }
         while dyaw < -std::f32::consts::PI { dyaw += std::f32::consts::TAU; }
-        tf.rotation.y += dyaw * (5.0 * dt).min(1.0);
+        mob.yaw += dyaw * (5.0 * dt).min(1.0);
 
-        // Скорость
+        // Нормализуем (защита от накопления ошибок)
+        while mob.yaw > std::f32::consts::TAU { mob.yaw -= std::f32::consts::TAU; }
+        while mob.yaw < 0.0 { mob.yaw += std::f32::consts::TAU; }
+
+        // === УСТАНАВЛИВАЕМ РОТАЦИЮ ПРАВИЛЬНО (из угла → кватернион) ===
+        tf.rotation = Quat::from_rotation_y(mob.yaw);
+
+        // === СКОРОСТЬ ===
         let speed_mult = if mob.panic_timer > 0.0 { 1.6 } else { 1.0 };
         let speed = if mob.walking { mob.mob_type.speed() * speed_mult } else { 0.0 };
 
-        let yaw = tf.rotation.y;
-        let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
+        // Направление "вперёд" в Bevy: -Z
+        let forward = Vec3::new(-mob.yaw.sin(), 0.0, -mob.yaw.cos());
         let horiz = forward * speed;
 
+        // === ГРАВИТАЦИЯ ===
         mob.velocity.y -= 28.0 * dt;
         if mob.velocity.y < -30.0 { mob.velocity.y = -30.0; }
 
@@ -244,7 +254,7 @@ fn mob_movement_system(
             mob.velocity = Vec3::ZERO;
         }
 
-        // НИКАКИХ манипуляций с масштабом — масштаб всегда (1,1,1)!
+        // === МАСШТАБ ВСЕГДА (1,1,1) ===
         tf.scale = Vec3::ONE;
     }
 }
