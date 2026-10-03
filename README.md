@@ -1,12 +1,8 @@
 # Minecraft Rust
 
-![Build](https://github.com/gttrfrd-rgb/minecraft_rust/actions/workflows/build.yml/badge.svg)
-[![Latest Release](https://img.shields.io/github/v/release/gttrfrd-rgb/minecraft_rust)](https://github.com/gttrfrd-rgb/minecraft_rust/releases/latest)
-![Downloads](https://img.shields.io/github/downloads/gttrfrd-rgb/minecraft_rust/total)
+[![Build](https://github.com/gttrfrd-rgb/minecraft_rust/actions/workflows/build.yml/badge.svg)](https://github.com/gttrfrd-rgb/minecraft_rust/actions/workflows/build.yml)
 
 Воксельная игра в стиле Minecraft, написанная на **Rust** с использованием движка **Bevy**.
-
-![Screenshot](https://img.shields.io/badge/status-in%20development-yellow)
 
 ---
 
