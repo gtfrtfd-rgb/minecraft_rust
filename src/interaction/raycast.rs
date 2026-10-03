@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
 use crate::player::camera::PlayerCamera;
+use crate::mobs::ai::Mob;
 
 pub const REACH_DISTANCE: f32 = 5.0;
 const HIGHLIGHT_MIN_DIST: f32 = 0.5;
@@ -18,14 +19,21 @@ pub struct TargetBlock {
     pub hit: Option<TargetHit>,
 }
 
+#[derive(Resource, Default)]
+pub struct TargetMob {
+    pub entity: Option<Entity>,
+}
+
 pub struct RaycastPlugin;
 
 impl Plugin for RaycastPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TargetBlock>()
+            .init_resource::<TargetMob>()
             .add_systems(
                 Update,
-                (update_target, draw_target_highlight).run_if(in_state(AppState::InGame)),
+                (update_target, update_target_mob, draw_target_highlight)
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -42,6 +50,58 @@ fn update_target(
     let origin = cam_tf.translation;
     let dir = cam_tf.forward().as_vec3();
     target.hit = raycast(&world, origin, dir, REACH_DISTANCE);
+}
+
+fn update_target_mob(
+    camera_q: Query<&Transform, With<PlayerCamera>>,
+    mob_q: Query<(Entity, &Transform, &Mob)>,
+    block_target: Res<TargetBlock>,
+    mut target_mob: ResMut<TargetMob>,
+) {
+    let Ok(cam_tf) = camera_q.get_single() else {
+        target_mob.entity = None;
+        return;
+    };
+
+    let origin = cam_tf.translation;
+    let dir = cam_tf.forward().as_vec3();
+
+    let block_dist = block_target
+        .hit
+        .map(|h| {
+            let center = Vec3::new(
+                h.block.x as f32 + 0.5,
+                h.block.y as f32 + 0.5,
+                h.block.z as f32 + 0.5,
+            );
+            (center - origin).length()
+        })
+        .unwrap_or(REACH_DISTANCE);
+
+    let mut best: Option<(Entity, f32)> = None;
+    let mut best_t = block_dist.min(REACH_DISTANCE);
+
+    for (entity, mob_tf, mob) in mob_q.iter() {
+        let center = mob_tf.translation
+            + Vec3::new(0.0, mob.mob_type.height() * 0.5, 0.0);
+
+        let to_mob = center - origin;
+        let along = to_mob.dot(dir);
+        if along < 0.0 || along > best_t {
+            continue;
+        }
+
+        let perp_sq = to_mob.length_squared() - along * along;
+        let r = mob.mob_type.radius().max(0.4);
+        if perp_sq > r * r {
+            continue;
+        }
+
+        best_t = along;
+        best = Some((entity, along));
+    }
+
+    target_mob.entity = best.map(|(e, _)| e);
 }
 
 fn draw_target_highlight(

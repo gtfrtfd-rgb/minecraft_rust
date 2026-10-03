@@ -11,32 +11,34 @@
 - 🌍 **Процедурная генерация мира** — биомы, рельеф, деревья
 - 🎨 **5 биомов** — равнины, лес, пустыня, снег, горы
 - 🌳 **2 типа деревьев** — дуб (раскидистый) и сосна (ёлка)
-- 🎯 **DDA-рейкаст** — точное определение блока под прицелом
+- 🐷 **4 типа мобов** — свинья, овца, корова, курица
+- 🎯 **DDA-рейкаст** — точное определение блока/моба под прицелом
 - ⛏ **Ломание и установка блоков** — ЛКМ / ПКМ
 - 🎒 **Хотбар** — 9 слотов, выбор через 1–9 или колесо мыши
 - 🚶 **Физика игрока** — гравитация, прыжки, бег, приседание, полёт
 - 🖱 **FPS-управление** — мышь захвачена, прицел в центре
 - 💾 **Автосохранение** — RLE-сжатие + JSON, каждые 30 сек
 - 🌫 **Туман расстояния** — скрывает границу мира
-- 🚧 **Невидимые барьеры** — нельзя выйти за пределы мира
+- 🎮 **Меню** — главное меню + пауза (Esc)
 - ⚡ **Высокая производительность** — 150+ FPS на среднем железе
 
 ---
 
 ## 📥 Скачать
 
-Готовые сборки публикуются на странице **[Releases](https://github.com/gttrfrd-rgb/minecraft_rust/releases/latest)**.
+Готовые сборки: **[Releases](https://github.com/gttrfrd-rgb/minecraft_rust/releases/latest)**
 
-| Платформа | Файл | Размер |
-|---|---|---|
-| **Windows** (x64) | `minecraft_rust-x86_64-pc-windows-msvc.zip` | ~17 MB |
-| **Linux** (x64) | `minecraft_rust-x86_64-unknown-linux-gnu.tar.gz` | ~22 MB |
-| **macOS** (Apple Silicon) | `minecraft_rust-aarch64-apple-darwin.tar.gz` | ~19 MB |
-| **macOS** (Intel) | `minecraft_rust-x86_64-apple-darwin.tar.gz` | ~20 MB |
+| Платформа | Файл |
+|---|---|
+| Windows (x64) | minecraft_rust-x86_64-pc-windows-msvc.zip |
+| Linux (x64) | minecraft_rust-x86_64-unknown-linux-gnu.tar.gz |
+| macOS (Apple Silicon) | minecraft_rust-aarch64-apple-darwin.tar.gz |
+| macOS (Intel) | minecraft_rust-x86_64-apple-darwin.tar.gz |
 
 **Как запустить:**
-- **Windows:** распаковать zip → запустить `minecraft_rust.exe`
-- **Linux/macOS:** распаковать → `chmod +x minecraft_rust` → `./minecraft_rust`
+
+- Windows: распаковать zip → запустить minecraft_rust.exe
+- Linux/macOS: распаковать → chmod +x minecraft_rust → ./minecraft_rust
 
 ---
 
@@ -44,19 +46,17 @@
 
 | Клавиша | Действие |
 |---|---|
-| **W A S D** / **← ↑ ↓ →** | Движение |
-| **Мышь** | Обзор |
-| **Space** | Прыжок (зажми — автопрыжок) |
-| **Ctrl** | Бег |
-| **Shift** | Присесть / спуск в полёте |
-| **F** | Полёт (вкл/выкл) |
-| **ЛКМ** | Сломать блок |
-| **ПКМ** | Поставить блок из выбранного слота |
-| **1 – 9** | Выбор слота в хотбаре |
-| **Колесо мыши** | Переключение слотов |
-| **Esc** | Выход из игры |
-
-**Совет:** зажми **Space** и **Ctrl** одновременно — персонаж будет автоматически бежать и прыгать (bunny hop).
+| W A S D / стрелки | Движение |
+| Мышь | Обзор |
+| Space | Прыжок (зажми — автопрыжок) |
+| Ctrl | Бег |
+| Shift | Присесть / спуск в полёте |
+| F | Полёт (вкл/выкл) |
+| ЛКМ | Ударить моба / сломать блок |
+| ПКМ | Поставить блок |
+| 1 – 9 | Выбор слота |
+| Колесо мыши | Переключение слотов |
+| Esc | Пауза / меню |
 
 ---
 
@@ -64,92 +64,66 @@
 
 ### Требования
 
-- **Rust** — установить с [rustup.rs](https://rustup.rs/)
-- **MSVC Build Tools** (только Windows) — [скачать](https://visualstudio.microsoft.com/downloads/?q=build+tools)
-  - Или используй GNU-toolchain: `rustup default stable-x86_64-pc-windows-gnu`
-- **Linux-зависимости** (Bevy):
-  ```bash
-  sudo apt install pkg-config libx11-dev libxcursor-dev libxrandr-dev \
-                   libxi-dev libxinerama-dev libgl1-mesa-dev \
-                   libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
-  ```
+- **Rust** — установить с rustup.rs
+- **MSVC Build Tools** (Windows) — скачать с visualstudio.microsoft.com
+- **Linux-зависимости** — выполнить в терминале:
+
+      sudo apt install pkg-config libx11-dev libxcursor-dev libxrandr-dev \
+                       libxi-dev libxinerama-dev libgl1-mesa-dev \
+                       libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
 ### Сборка и запуск
 
-```bash
-# Клонировать репозиторий
-git clone https://github.com/gttrfrd-rgb/minecraft_rust.git
-cd minecraft_rust
+    git clone https://github.com/gttrfrd-rgb/minecraft_rust.git
+    cd minecraft_rust
+    cargo run --release
 
-# Собрать и запустить в release-режиме (быстрее)
-cargo run --release
-```
-
-Первая сборка занимает **5–15 минут** (компиляция Bevy и зависимостей). Последующие — 30 сек – 2 мин.
-
-### Сборка бинарника
-
-```bash
-cargo build --release
-```
-
-Готовый `.exe` / бинарник будет в `target/release/`.
+Первая сборка — 5–15 минут. Последующие — 30 сек – 2 мин.
 
 ---
 
 ## 📁 Структура проекта
 
-```
-minecraft_rust/
-├── .github/workflows/
-│   └── build.yml              # CI: автобилд для Win/Linux/macOS
-├── src/
-│   ├── main.rs                # Точка входа, регистрация плагинов
-│   ├── core/
-│   │   ├── mod.rs
-│   │   └── state.rs           # Глобальные состояния, константы
-│   ├── world/
-│   │   ├── mod.rs
-│   │   ├── chunk.rs           # Данные мира + построение меша
-│   │   └── generator.rs       # Генерация рельефа и биомов
-│   ├── player/
-│   │   ├── mod.rs
-│   │   ├── controller.rs      # Физика игрока
-│   │   └── camera.rs          # Камера от 1-го лица + туман
-│   ├── interaction/
-│   │   ├── mod.rs
-│   │   ├── raycast.rs         # DDA-рейкаст блоков
-│   │   └── breaking.rs        # Ломание/установка
-│   ├── mobs/                  # (заглушки) мобы
-│   │   ├── mod.rs
-│   │   ├── ai.rs
-│   │   └── spawn.rs
-│   ├── ui/
-│   │   ├── mod.rs
-│   │   ├── hotbar.rs          # Хотбар 9 слотов
-│   │   └── hud.rs             # Прицел, координаты, FPS
-│   └── save/
-│       ├── mod.rs
-│       └── persistence.rs     # RLE + JSON сохранения
-├── Cargo.toml
-└── README.md
-```
-
-Архитектура построена на **плагинах Bevy** — каждая система в отдельном файле. Легко добавлять/убирать модули в `main.rs`.
+    minecraft_rust/
+    ├── .github/workflows/build.yml    # CI для Win/Linux/macOS
+    ├── src/
+    │   ├── main.rs                    # Точка входа
+    │   ├── core/state.rs              # Состояния (Menu/InGame/Paused)
+    │   ├── world/
+    │   │   ├── chunk.rs               # Данные мира + меш
+    │   │   └── generator.rs           # Биомы + деревья
+    │   ├── player/
+    │   │   ├── controller.rs          # Физика игрока
+    │   │   └── camera.rs              # Камера + туман
+    │   ├── interaction/
+    │   │   ├── raycast.rs             # DDA-рейкаст
+    │   │   └── breaking.rs            # Ломание/установка/атака
+    │   ├── mobs/
+    │   │   ├── ai.rs                  # ИИ и анимация
+    │   │   └── spawn.rs               # Спавн мобов
+    │   ├── ui/
+    │   │   ├── menu.rs                # Главное меню + пауза
+    │   │   ├── hotbar.rs              # Хотбар
+    │   │   └── hud.rs                 # Прицел, координаты, FPS
+    │   └── save/persistence.rs        # RLE + JSON
+    ├── Cargo.toml
+    └── README.md
 
 ---
 
 ## 💾 Сохранения
 
-Игра **автоматически** сохраняет мир:
-- Каждые **30 секунд** во время игры
-- При выходе (Esc)
+Игра автоматически сохраняет мир:
 
-Файлы сохранения лежат рядом с `.exe` в папке `saves/`:
-- `saves/world.bin` — RLE-сжатые блоки (обычно ~180 KB)
-- `saves/meta.json` — сид мира, позиция игрока, режим
+- Каждые 30 секунд
+- При выходе (Esc → Exit Game)
 
-**Чтобы начать новый мир** — удали папку `saves/`.
+Файлы в папке saves/ рядом с .exe:
+
+- saves/world.bin — RLE-сжатые блоки (~180 KB)
+- saves/meta.json — сид, позиция игрока, режим
+
+**Начать новый мир** — удалить папку saves/.
 
 ---
 
@@ -160,8 +134,8 @@ minecraft_rust/
 | Язык | Rust 1.75+ |
 | Движок | Bevy 0.15 |
 | Графика | wgpu (Vulkan/Metal/DX12) |
-| Шум | `noise` (Perlin) |
-| Сохранения | `serde` + `serde_json` + RLE |
+| Шум | noise (Perlin) |
+| Сохранения | serde + serde_json + RLE |
 | CI/CD | GitHub Actions |
 
 ---
@@ -173,39 +147,28 @@ minecraft_rust/
 - [x] Хотбар + HUD
 - [x] Сохранения мира
 - [x] Автоматическая сборка под 4 платформы
-- [ ] 🐷 Мобы (pig, sheep, cow, chicken)
-- [ ] 🌍 Бесконечный мир (chunk streaming)
-- [ ] 🔊 Звуковые эффекты
-- [ ] 🎨 Меню паузы
-- [ ] 🌞 Цикл дня и ночи
-- [ ] 🎒 Инвентарь
+- [x] Главное меню + пауза
+- [x] Мобы с AI
+- [ ] Бесконечный мир (chunk streaming)
+- [ ] Звуковые эффекты
+- [ ] Цикл дня и ночи
+- [ ] Инвентарь
+- [ ] Вода и лава
 
 ---
 
 ## 🤝 Вклад
 
-Pull request'ы приветствуются. Перед пушем убедись, что:
+Pull request'ы приветствуются. Перед пушем:
 
-```bash
-cargo build --release     # собирается без ошибок
-cargo clippy --release    # нет warnings от clippy
-```
-
-CI автоматически проверит сборку на всех 4 платформах.
+    cargo build --release
+    cargo clippy --release
 
 ---
 
 ## 📜 Лицензия
 
-MIT License — см. [LICENSE](LICENSE).
-
----
-
-## 🙏 Благодарности
-
-- **[Bevy](https://bevyengine.org/)** — мощный ECS-движок на Rust
-- **[Notch](https://en.wikipedia.org/wiki/Markus_Persson)** — за оригинальный Minecraft
-- Вдохновлено веб-версией на Three.js
+MIT License — см. LICENSE.
 
 ---
 

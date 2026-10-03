@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use crate::core::state::{AppState, HOTBAR, SelectedSlot};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
-use super::raycast::TargetBlock;
+use crate::mobs::ai::Mob;
+use super::raycast::{TargetBlock, TargetMob};
 
 pub struct BreakingPlugin;
 
@@ -10,31 +11,45 @@ impl Plugin for BreakingPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (handle_break, handle_place).run_if(in_state(AppState::InGame)),
+            (handle_attack_or_break, handle_place).run_if(in_state(AppState::InGame)),
         );
         info!("BreakingPlugin loaded.");
     }
 }
 
-fn handle_break(
+fn handle_attack_or_break(
     mouse: Res<ButtonInput<MouseButton>>,
-    target: Res<TargetBlock>,
+    target_block: Res<TargetBlock>,
+    target_mob: Res<TargetMob>,
     mut world: ResMut<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
+    mut mob_q: Query<&mut Mob>,
 ) {
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
-    let Some(hit) = target.hit else { return; };
 
-    if hit.block.y <= 0 {
-        return;
+    if let Some(mob_entity) = target_mob.entity {
+        if let Ok(mut mob) = mob_q.get_mut(mob_entity) {
+            const DAMAGE: i32 = 3;
+            mob.hp -= DAMAGE;
+            mob.hurt_timer = 0.3;
+            mob.panic_timer = 4.0;
+
+            if mob.hp <= 0 {
+                info!("Mob killed");
+            } else {
+                info!("Mob hit! HP: {}/{}", mob.hp, mob.max_hp);
+            }
+            return;
+        }
     }
+
+    let Some(hit) = target_block.hit else { return; };
+    if hit.block.y <= 0 { return; }
 
     let block = world.get(hit.block.x, hit.block.y, hit.block.z);
-    if !block.is_solid() {
-        return;
-    }
+    if !block.is_solid() { return; }
 
     world.set(hit.block.x, hit.block.y, hit.block.z, BlockType::Air);
     dirty.mark(hit.block.x, hit.block.z);
@@ -48,27 +63,17 @@ fn handle_place(
     mut dirty: ResMut<DirtyChunks>,
     player_q: Query<&Transform, With<Player>>,
 ) {
-    if !mouse.just_pressed(MouseButton::Right) {
-        return;
-    }
+    if !mouse.just_pressed(MouseButton::Right) { return; }
     let Some(hit) = target.hit else { return; };
 
-    if hit.normal == IVec3::ZERO {
-        return;
-    }
+    if hit.normal == IVec3::ZERO { return; }
 
     let pos = hit.prev;
-    if !WorldData::in_bounds(pos.x, pos.y, pos.z) {
-        return;
-    }
-    if world.get(pos.x, pos.y, pos.z).is_solid() {
-        return;
-    }
+    if !WorldData::in_bounds(pos.x, pos.y, pos.z) { return; }
+    if world.get(pos.x, pos.y, pos.z).is_solid() { return; }
 
     if let Ok(player_tf) = player_q.get_single() {
-        if block_intersects_player(pos, player_tf.translation) {
-            return;
-        }
+        if block_intersects_player(pos, player_tf.translation) { return; }
     }
 
     let block_to_place = HOTBAR[selected.0];
