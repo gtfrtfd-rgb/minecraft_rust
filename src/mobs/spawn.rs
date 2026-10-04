@@ -21,6 +21,9 @@ const INITIAL_MOB_COUNT: usize = 40;
 const MIN_DIST_FROM_PLAYER: f32 = 16.0;
 const SKY_CLEARANCE: i32 = 5;
 
+// ============================================================
+// КУБ (6 граней × 4 вершины)
+// ============================================================
 const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([ 1.0, 0.0, 0.0], [[ 1.0,-1.0, 1.0],[ 1.0,-1.0,-1.0],[ 1.0, 1.0,-1.0],[ 1.0, 1.0, 1.0]]),
     ([-1.0, 0.0, 0.0], [[-1.0,-1.0,-1.0],[-1.0,-1.0, 1.0],[-1.0, 1.0, 1.0],[-1.0, 1.0,-1.0]]),
@@ -92,6 +95,9 @@ fn rgba(c: Color) -> [f32; 4] {
     [s.red, s.green, s.blue, 1.0]
 }
 
+// ============================================================
+// ЦВЕТА МОБОВ
+// ============================================================
 struct MobColors {
     body: Color,
     head: Color,
@@ -138,6 +144,9 @@ fn colors_for(mt: MobType) -> MobColors {
     }
 }
 
+// ============================================================
+// МЕШ ТЕЛА + ГОЛОВЫ + ДЕТАЛЕЙ
+// ============================================================
 fn build_body_mesh(mt: MobType) -> Mesh {
     let c = colors_for(mt);
     let mut b = MeshBuilder::new();
@@ -150,118 +159,167 @@ fn build_body_mesh(mt: MobType) -> Mesh {
     let head_offset_z = -(body_size.z * 0.5 + head_size.z * 0.5);
     let head_y = h * 0.85;
 
+    // Тело
     b.add_cube(Vec3::new(0.0, body_y, 0.0), body_size, rgba(c.body));
+
+    // Голова
     b.add_cube(Vec3::new(0.0, head_y, head_offset_z), head_size, rgba(c.head));
 
+    // Детали
     match mt {
         MobType::Pig => {
+            // Пятачок
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.03),
                 Vec3::new(head_size.x * 0.55, head_size.y * 0.45, 0.06),
                 rgba(c.detail),
             );
+            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.28, head_y + head_size.y * 0.15,
-                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(
+                        sx * head_size.x * 0.28,
+                        head_y + head_size.y * 0.15,
+                        head_offset_z - head_size.z * 0.5 - 0.005,
+                    ),
                     Vec3::new(0.08, 0.08, 0.02),
                     rgba(c.eye),
                 );
             }
+            // Ушки
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.35, head_y + head_size.y * 0.5 + 0.05,
-                              head_offset_z),
+                    Vec3::new(
+                        sx * head_size.x * 0.35,
+                        head_y + head_size.y * 0.5 + 0.05,
+                        head_offset_z,
+                    ),
                     Vec3::new(0.12, 0.15, 0.08),
                     rgba(c.body),
                 );
             }
         }
         MobType::Sheep => {
+            // Морда
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.02),
                 Vec3::new(head_size.x * 0.7, head_size.y * 0.6, 0.05),
                 rgba(c.detail),
             );
+            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.25, head_y + head_size.y * 0.15,
-                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(
+                        sx * head_size.x * 0.25,
+                        head_y + head_size.y * 0.15,
+                        head_offset_z - head_size.z * 0.5 - 0.005,
+                    ),
                     Vec3::new(0.07, 0.07, 0.02),
                     rgba(c.eye),
                 );
             }
+            // Уши
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * (head_size.x * 0.5 + 0.04), head_y + 0.05, head_offset_z),
+                    Vec3::new(
+                        sx * (head_size.x * 0.5 + 0.04),
+                        head_y + 0.05,
+                        head_offset_z,
+                    ),
                     Vec3::new(0.10, 0.05, 0.15),
                     rgba(c.head),
                 );
             }
         }
         MobType::Cow => {
+            // Белая морда
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.08, head_offset_z - head_size.z * 0.5 - 0.03),
                 Vec3::new(head_size.x * 0.75, head_size.y * 0.55, 0.07),
                 rgba(c.detail),
             );
+            // Нос
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.06),
                 Vec3::new(0.15, 0.08, 0.03),
                 rgba(Color::srgb(0.15, 0.08, 0.05)),
             );
+            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.30, head_y + head_size.y * 0.10,
-                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(
+                        sx * head_size.x * 0.30,
+                        head_y + head_size.y * 0.10,
+                        head_offset_z - head_size.z * 0.5 - 0.005,
+                    ),
                     Vec3::new(0.08, 0.08, 0.02),
                     rgba(c.eye),
                 );
             }
+            // Рога
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.32, head_y + head_size.y * 0.5 + 0.06,
-                              head_offset_z),
+                    Vec3::new(
+                        sx * head_size.x * 0.32,
+                        head_y + head_size.y * 0.5 + 0.06,
+                        head_offset_z,
+                    ),
                     Vec3::new(0.10, 0.15, 0.10),
                     rgba(c.detail),
                 );
             }
+            // Уши
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * (head_size.x * 0.5 + 0.05), head_y + head_size.y * 0.15,
-                              head_offset_z),
+                    Vec3::new(
+                        sx * (head_size.x * 0.5 + 0.05),
+                        head_y + head_size.y * 0.15,
+                        head_offset_z,
+                    ),
                     Vec3::new(0.10, 0.15, 0.08),
                     rgba(c.head),
                 );
             }
         }
         MobType::Chicken => {
+            // Клюв
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.02, head_offset_z - head_size.z * 0.5 - 0.04),
                 Vec3::new(0.10, 0.06, 0.08),
                 rgba(c.detail),
             );
+            // Гребень
             b.add_cube(
                 Vec3::new(0.0, head_y + head_size.y * 0.5 + 0.05, head_offset_z),
                 Vec3::new(0.10, 0.10, 0.18),
                 rgba(c.extra),
             );
+            // Бородка
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.02),
                 Vec3::new(0.06, 0.08, 0.05),
                 rgba(c.extra),
             );
+            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * head_size.x * 0.35, head_y + head_size.y * 0.20,
-                              head_offset_z - head_size.z * 0.5 - 0.003),
+                    Vec3::new(
+                        sx * head_size.x * 0.35,
+                        head_y + head_size.y * 0.20,
+                        head_offset_z - head_size.z * 0.5 - 0.003,
+                    ),
                     Vec3::new(0.05, 0.05, 0.02),
                     rgba(c.eye),
                 );
             }
+            // Крылья
             for sx in [-1.0, 1.0] {
                 b.add_cube(
-                    Vec3::new(sx * (body_size.x * 0.5 + 0.025), body_y, 0.0),
+                    Vec3::new(
+                        sx * (body_size.x * 0.5 + 0.025),
+                        body_y,
+                        0.0,
+                    ),
                     Vec3::new(0.05, body_size.y * 0.6, body_size.z * 0.7),
                     rgba(c.body),
                 );
@@ -272,6 +330,9 @@ fn build_body_mesh(mt: MobType) -> Mesh {
     b.build()
 }
 
+// ============================================================
+// МЕШ НОГИ
+// ============================================================
 fn build_leg_mesh(mt: MobType) -> Mesh {
     let c = colors_for(mt);
     let mut b = MeshBuilder::new();
@@ -281,6 +342,9 @@ fn build_leg_mesh(mt: MobType) -> Mesh {
     b.build()
 }
 
+// ============================================================
+// СПАВН
+// ============================================================
 fn spawn_initial_mobs(
     mut commands: Commands,
     world: Res<WorldData>,
@@ -299,6 +363,7 @@ fn spawn_initial_mobs(
     );
     let t0 = std::time::Instant::now();
 
+    // Меши для каждого типа
     let pig_body     = meshes.add(build_body_mesh(MobType::Pig));
     let sheep_body   = meshes.add(build_body_mesh(MobType::Sheep));
     let cow_body     = meshes.add(build_body_mesh(MobType::Cow));
@@ -309,6 +374,7 @@ fn spawn_initial_mobs(
     let cow_leg     = meshes.add(build_leg_mesh(MobType::Cow));
     let chicken_leg = meshes.add(build_leg_mesh(MobType::Chicken));
 
+    // Один материал на всех
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         unlit: false,
@@ -336,6 +402,7 @@ fn spawn_initial_mobs(
             continue;
         }
 
+        // Верхний твёрдый блок
         let mut top_y: Option<i32> = None;
         for y in (1..SY - 1).rev() {
             if world.get(x, y, z).is_solid() {
@@ -346,6 +413,7 @@ fn spawn_initial_mobs(
         let Some(ground_y) = top_y else { continue };
         let spawn_y = ground_y + 1;
 
+        // Открытое небо
         let mut sky_clear = true;
         for dy in 0..SKY_CLEARANCE {
             let check_y = spawn_y + dy;
@@ -357,6 +425,7 @@ fn spawn_initial_mobs(
         }
         if !sky_clear { continue; }
 
+        // Свободное место
         let mut free = true;
         for dy in 0..3 {
             if world.get(x, spawn_y + dy, z).is_solid() {
@@ -398,6 +467,9 @@ fn spawn_initial_mobs(
     );
 }
 
+// ============================================================
+// СОЗДАНИЕ ОДНОГО МОБА
+// ============================================================
 fn spawn_mob(
     commands: &mut Commands,
     body_mesh: Handle<Mesh>,
@@ -414,60 +486,62 @@ fn spawn_mob(
     let leg_offset_z = body_size.z * 0.35;
     let leg_top_y = leg_size.y;
 
+    // 4 позиции для ног: FL, FR, BL, BR
     let leg_positions = [
-        Vec3::new( leg_offset_x, leg_top_y, -leg_offset_z),
-        Vec3::new(-leg_offset_x, leg_top_y, -leg_offset_z),
-        Vec3::new( leg_offset_x, leg_top_y,  leg_offset_z),
-        Vec3::new(-leg_offset_x, leg_top_y,  leg_offset_z),
+        Vec3::new( leg_offset_x, leg_top_y, -leg_offset_z), // Front-Left
+        Vec3::new(-leg_offset_x, leg_top_y, -leg_offset_z), // Front-Right
+        Vec3::new( leg_offset_x, leg_top_y,  leg_offset_z), // Back-Left
+        Vec3::new(-leg_offset_x, leg_top_y,  leg_offset_z), // Back-Right
     ];
 
     let mut leg_pivots: Vec<Entity> = Vec::with_capacity(4);
 
     for (i, pos) in leg_positions.iter().enumerate() {
-        let leg_mesh_entity = commands.spawn((
-            Mesh3d(leg_mesh.clone()),
-            MeshMaterial3d(material.clone()),
-            Name::new(format!("LegMesh{}", i)),
-        )).id();
+        // Меш ноги — потомок pivot, сдвинут вниз
+        let leg_mesh_entity = commands
+            .spawn((
+                Mesh3d(leg_mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Name::new(format!("LegMesh{}", i)),
+            ))
+            .id();
 
-        let pivot_entity = commands.spawn((
-            Transform::from_translation(*pos),
-            Visibility::default(),
-            Name::new(format!("LegPivot{}", i)),
-        )).id();
+        // Pivot — верхняя точка ноги
+        let pivot_entity = commands
+            .spawn((
+                Transform::from_translation(*pos),
+                Visibility::default(),
+                Name::new(format!("LegPivot{}", i)),
+            ))
+            .id();
 
         commands.entity(pivot_entity).add_children(&[leg_mesh_entity]);
         leg_pivots.push(pivot_entity);
     }
 
-    let body_entity = commands.spawn((
-        Mesh3d(body_mesh.clone()),
-        MeshMaterial3d(material.clone()),
-        Name::new("BodyHead"),
-    )).id();
+    // Тело + голова одним мешем
+    let body_entity = commands
+        .spawn((
+            Mesh3d(body_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Name::new("BodyHead"),
+        ))
+        .id();
 
-    let root_entity = commands.spawn((
-        Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
-        Visibility::default(),
-        Mob {
-            mob_type,
-            hp: mob_type.max_hp(),
-            max_hp: mob_type.max_hp(),
-            velocity: Vec3::ZERO,
-            on_ground: false,
-            walking: false,
-            wander_timer: 1.0,
-            yaw,
-            target_yaw: yaw,
-            panic_timer: 0.0,
-            hurt_timer: 0.0,
-            walk_phase: 0.0,
-            stuck_timer: 0.0,
-            legs: leg_pivots.clone(),
-        },
-        Name::new(format!("{:?}", mob_type)),
-    )).id();
+    // === КОРЕНЬ МОБА — Mob::new() ===
+    let mut mob = Mob::new(mob_type, yaw);
+    mob.legs = leg_pivots.clone();
 
+    let root_entity = commands
+        .spawn((
+            Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
+            Visibility::default(),
+            mob,
+            Name::new(format!("{:?}", mob_type)),
+        ))
+        .id();
+
+    // Привязываем всё к корню
     let mut all_children = vec![body_entity];
     all_children.extend(leg_pivots.iter().copied());
     commands.entity(root_entity).add_children(&all_children);

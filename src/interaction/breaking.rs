@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use crate::core::state::{AppState, HOTBAR, SelectedSlot};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
-use crate::mobs::ai::Mob;
+use crate::mobs::ai::{Mob, MobState};
 use super::raycast::{TargetBlock, TargetMob};
 
 pub struct BreakingPlugin;
@@ -34,12 +34,13 @@ fn handle_attack_or_break(
             const DAMAGE: i32 = 3;
             mob.hp -= DAMAGE;
             mob.hurt_timer = 0.3;
-            mob.panic_timer = 4.0;
+            mob.panic_timer = 5.0;
+            mob.state = MobState::Flee;
 
             if mob.hp <= 0 {
                 info!("Mob killed");
             } else {
-                info!("Mob hit! HP: {}/{}", mob.hp, mob.max_hp);
+                info!("Mob hit! HP: {}/{} (fleeing)", mob.hp, mob.max_hp);
             }
             return;
         }
