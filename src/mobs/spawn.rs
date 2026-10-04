@@ -30,94 +30,255 @@ const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([0.0, 0.0, -1.0], [[ 1.0,-1.0,-1.0],[-1.0,-1.0,-1.0],[-1.0, 1.0,-1.0],[ 1.0, 1.0,-1.0]]),
 ];
 
-fn push_cube(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    colors: &mut Vec<[f32; 4]>,
-    indices: &mut Vec<u32>,
-    center: Vec3,
-    size: Vec3,
-    color: [f32; 4],
-) {
-    let half = size * 0.5;
+const FACE_UV: [[f32; 2]; 4] = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
 
-    for (normal, corners) in CUBE_FACES.iter() {
-        let base = positions.len() as u32;
-        for c in corners {
-            positions.push([
-                center.x + c[0] * half.x,
-                center.y + c[1] * half.y,
-                center.z + c[2] * half.z,
-            ]);
-            normals.push(*normal);
-            colors.push(color);
+struct MeshBuilder {
+    positions: Vec<[f32; 3]>,
+    normals:   Vec<[f32; 3]>,
+    uvs:       Vec<[f32; 2]>,
+    colors:    Vec<[f32; 4]>,
+    indices:   Vec<u32>,
+}
+
+impl MeshBuilder {
+    fn new() -> Self {
+        Self {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: Vec::new(),
+            indices: Vec::new(),
         }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    fn add_cube(&mut self, center: Vec3, size: Vec3, color: [f32; 4]) {
+        let half = size * 0.5;
+
+        for (normal, corners) in CUBE_FACES.iter() {
+            let base = self.positions.len() as u32;
+            for (j, c) in corners.iter().enumerate() {
+                self.positions.push([
+                    center.x + c[0] * half.x,
+                    center.y + c[1] * half.y,
+                    center.z + c[2] * half.z,
+                ]);
+                self.normals.push(*normal);
+                self.uvs.push(FACE_UV[j]);
+                self.colors.push(color);
+            }
+            self.indices.extend_from_slice(&[
+                base, base + 1, base + 2,
+                base, base + 2, base + 3,
+            ]);
+        }
+    }
+
+    fn build(self) -> Mesh {
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.colors);
+        mesh.insert_indices(Indices::U32(self.indices));
+        mesh
     }
 }
 
-fn build_mob_mesh(mob_type: MobType) -> Mesh {
-    let h = mob_type.height();
-    let body_size = mob_type.body_size();
-    let head_size = mob_type.head_size();
-    let leg_size = mob_type.leg_size();
+fn rgba(c: Color) -> [f32; 4] {
+    let s = c.to_srgba();
+    [s.red, s.green, s.blue, 1.0]
+}
 
-    let body_srgba = mob_type.body_color().to_srgba();
-    let leg_srgba = mob_type.leg_color().to_srgba();
+struct MobColors {
+    body: Color,
+    head: Color,
+    leg: Color,
+    detail: Color,
+    extra: Color,
+    eye: Color,
+}
 
-    let body_color = [body_srgba.red, body_srgba.green, body_srgba.blue, 1.0];
-    let leg_color = [leg_srgba.red, leg_srgba.green, leg_srgba.blue, 1.0];
+fn colors_for(mt: MobType) -> MobColors {
+    match mt {
+        MobType::Pig => MobColors {
+            body:   Color::srgb(0.95, 0.62, 0.62),
+            head:   Color::srgb(0.95, 0.62, 0.62),
+            leg:    Color::srgb(0.80, 0.50, 0.50),
+            detail: Color::srgb(0.85, 0.45, 0.45),
+            extra:  Color::srgb(0.95, 0.62, 0.62),
+            eye:    Color::srgb(0.05, 0.03, 0.05),
+        },
+        MobType::Sheep => MobColors {
+            body:   Color::srgb(0.95, 0.95, 0.92),
+            head:   Color::srgb(0.85, 0.80, 0.72),
+            leg:    Color::srgb(0.30, 0.28, 0.26),
+            detail: Color::srgb(0.20, 0.18, 0.16),
+            extra:  Color::srgb(0.75, 0.70, 0.62),
+            eye:    Color::srgb(0.05, 0.03, 0.05),
+        },
+        MobType::Cow => MobColors {
+            body:   Color::srgb(0.42, 0.28, 0.14),
+            head:   Color::srgb(0.42, 0.28, 0.14),
+            leg:    Color::srgb(0.35, 0.22, 0.10),
+            detail: Color::srgb(0.92, 0.88, 0.82),
+            extra:  Color::srgb(0.20, 0.14, 0.08),
+            eye:    Color::srgb(0.05, 0.03, 0.05),
+        },
+        MobType::Chicken => MobColors {
+            body:   Color::srgb(0.98, 0.98, 0.98),
+            head:   Color::srgb(0.98, 0.98, 0.98),
+            leg:    Color::srgb(0.92, 0.62, 0.12),
+            detail: Color::srgb(0.95, 0.65, 0.15),
+            extra:  Color::srgb(0.85, 0.15, 0.15),
+            eye:    Color::srgb(0.05, 0.03, 0.05),
+        },
+    }
+}
 
+fn build_body_mesh(mt: MobType) -> Mesh {
+    let c = colors_for(mt);
+    let mut b = MeshBuilder::new();
+
+    let h = mt.height();
+    let body_size = mt.body_size();
+    let head_size = mt.head_size();
+
+    let body_y = h * 0.5;
     let head_offset_z = -(body_size.z * 0.5 + head_size.z * 0.5);
     let head_y = h * 0.85;
 
-    let leg_offset_x = body_size.x * 0.35;
-    let leg_offset_z = body_size.z * 0.35;
-    let leg_y = leg_size.y * 0.5;
+    b.add_cube(Vec3::new(0.0, body_y, 0.0), body_size, rgba(c.body));
+    b.add_cube(Vec3::new(0.0, head_y, head_offset_z), head_size, rgba(c.head));
 
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals: Vec<[f32; 3]> = Vec::new();
-    let mut colors: Vec<[f32; 4]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
-    push_cube(
-        &mut positions, &mut normals, &mut colors, &mut indices,
-        Vec3::new(0.0, h * 0.5, 0.0),
-        body_size,
-        body_color,
-    );
-
-    push_cube(
-        &mut positions, &mut normals, &mut colors, &mut indices,
-        Vec3::new(0.0, head_y, head_offset_z),
-        head_size,
-        body_color,
-    );
-
-    let leg_positions = [
-        Vec3::new( leg_offset_x, leg_y, -leg_offset_z),
-        Vec3::new(-leg_offset_x, leg_y, -leg_offset_z),
-        Vec3::new( leg_offset_x, leg_y,  leg_offset_z),
-        Vec3::new(-leg_offset_x, leg_y,  leg_offset_z),
-    ];
-    for pos in leg_positions {
-        push_cube(
-            &mut positions, &mut normals, &mut colors, &mut indices,
-            pos,
-            leg_size,
-            leg_color,
-        );
+    match mt {
+        MobType::Pig => {
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.03),
+                Vec3::new(head_size.x * 0.55, head_size.y * 0.45, 0.06),
+                rgba(c.detail),
+            );
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.28, head_y + head_size.y * 0.15,
+                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(0.08, 0.08, 0.02),
+                    rgba(c.eye),
+                );
+            }
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.35, head_y + head_size.y * 0.5 + 0.05,
+                              head_offset_z),
+                    Vec3::new(0.12, 0.15, 0.08),
+                    rgba(c.body),
+                );
+            }
+        }
+        MobType::Sheep => {
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.02),
+                Vec3::new(head_size.x * 0.7, head_size.y * 0.6, 0.05),
+                rgba(c.detail),
+            );
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.25, head_y + head_size.y * 0.15,
+                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(0.07, 0.07, 0.02),
+                    rgba(c.eye),
+                );
+            }
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * (head_size.x * 0.5 + 0.04), head_y + 0.05, head_offset_z),
+                    Vec3::new(0.10, 0.05, 0.15),
+                    rgba(c.head),
+                );
+            }
+        }
+        MobType::Cow => {
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.08, head_offset_z - head_size.z * 0.5 - 0.03),
+                Vec3::new(head_size.x * 0.75, head_size.y * 0.55, 0.07),
+                rgba(c.detail),
+            );
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.06),
+                Vec3::new(0.15, 0.08, 0.03),
+                rgba(Color::srgb(0.15, 0.08, 0.05)),
+            );
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.30, head_y + head_size.y * 0.10,
+                              head_offset_z - head_size.z * 0.5 - 0.005),
+                    Vec3::new(0.08, 0.08, 0.02),
+                    rgba(c.eye),
+                );
+            }
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.32, head_y + head_size.y * 0.5 + 0.06,
+                              head_offset_z),
+                    Vec3::new(0.10, 0.15, 0.10),
+                    rgba(c.detail),
+                );
+            }
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * (head_size.x * 0.5 + 0.05), head_y + head_size.y * 0.15,
+                              head_offset_z),
+                    Vec3::new(0.10, 0.15, 0.08),
+                    rgba(c.head),
+                );
+            }
+        }
+        MobType::Chicken => {
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.02, head_offset_z - head_size.z * 0.5 - 0.04),
+                Vec3::new(0.10, 0.06, 0.08),
+                rgba(c.detail),
+            );
+            b.add_cube(
+                Vec3::new(0.0, head_y + head_size.y * 0.5 + 0.05, head_offset_z),
+                Vec3::new(0.10, 0.10, 0.18),
+                rgba(c.extra),
+            );
+            b.add_cube(
+                Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.02),
+                Vec3::new(0.06, 0.08, 0.05),
+                rgba(c.extra),
+            );
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.35, head_y + head_size.y * 0.20,
+                              head_offset_z - head_size.z * 0.5 - 0.003),
+                    Vec3::new(0.05, 0.05, 0.02),
+                    rgba(c.eye),
+                );
+            }
+            for sx in [-1.0, 1.0] {
+                b.add_cube(
+                    Vec3::new(sx * (body_size.x * 0.5 + 0.025), body_y, 0.0),
+                    Vec3::new(0.05, body_size.y * 0.6, body_size.z * 0.7),
+                    rgba(c.body),
+                );
+            }
+        }
     }
 
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
+    b.build()
+}
+
+fn build_leg_mesh(mt: MobType) -> Mesh {
+    let c = colors_for(mt);
+    let mut b = MeshBuilder::new();
+    let leg_size = mt.leg_size();
+    let center = Vec3::new(0.0, -leg_size.y * 0.5, 0.0);
+    b.add_cube(center, leg_size, rgba(c.leg));
+    b.build()
 }
 
 fn spawn_initial_mobs(
@@ -138,10 +299,15 @@ fn spawn_initial_mobs(
     );
     let t0 = std::time::Instant::now();
 
-    let pig_mesh     = meshes.add(build_mob_mesh(MobType::Pig));
-    let sheep_mesh   = meshes.add(build_mob_mesh(MobType::Sheep));
-    let cow_mesh     = meshes.add(build_mob_mesh(MobType::Cow));
-    let chicken_mesh = meshes.add(build_mob_mesh(MobType::Chicken));
+    let pig_body     = meshes.add(build_body_mesh(MobType::Pig));
+    let sheep_body   = meshes.add(build_body_mesh(MobType::Sheep));
+    let cow_body     = meshes.add(build_body_mesh(MobType::Cow));
+    let chicken_body = meshes.add(build_body_mesh(MobType::Chicken));
+
+    let pig_leg     = meshes.add(build_leg_mesh(MobType::Pig));
+    let sheep_leg   = meshes.add(build_leg_mesh(MobType::Sheep));
+    let cow_leg     = meshes.add(build_leg_mesh(MobType::Cow));
+    let chicken_leg = meshes.add(build_leg_mesh(MobType::Chicken));
 
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -201,37 +367,24 @@ fn spawn_initial_mobs(
         if !free { continue; }
 
         let mob_type = types[rng.gen_range(0..types.len())];
-        let mesh = match mob_type {
-            MobType::Pig => pig_mesh.clone(),
-            MobType::Sheep => sheep_mesh.clone(),
-            MobType::Cow => cow_mesh.clone(),
-            MobType::Chicken => chicken_mesh.clone(),
+        let (body_mesh, leg_mesh) = match mob_type {
+            MobType::Pig => (pig_body.clone(), pig_leg.clone()),
+            MobType::Sheep => (sheep_body.clone(), sheep_leg.clone()),
+            MobType::Cow => (cow_body.clone(), cow_leg.clone()),
+            MobType::Chicken => (chicken_body.clone(), chicken_leg.clone()),
         };
 
         let yaw = rng.gen_range(0.0..std::f32::consts::TAU);
 
-        commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material.clone()),
-            Transform::from_translation(
-                Vec3::new(x as f32 + 0.5, spawn_y as f32, z as f32 + 0.5)
-            ),
-            // ВАЖНО: без .with_rotation — поворот ставится каждый кадр из mob.yaw
-            Mob {
-                mob_type,
-                hp: mob_type.max_hp(),
-                max_hp: mob_type.max_hp(),
-                velocity: Vec3::ZERO,
-                on_ground: false,
-                walking: false,
-                wander_timer: 1.0,
-                yaw,
-                target_yaw: yaw,
-                panic_timer: 0.0,
-                hurt_timer: 0.0,
-            },
-            Name::new(format!("{:?}", mob_type)),
-        ));
+        spawn_mob(
+            &mut commands,
+            body_mesh,
+            leg_mesh,
+            material.clone(),
+            mob_type,
+            Vec3::new(x as f32 + 0.5, spawn_y as f32, z as f32 + 0.5),
+            yaw,
+        );
 
         spawned += 1;
     }
@@ -243,4 +396,79 @@ fn spawn_initial_mobs(
         attempts,
         max_attempts
     );
+}
+
+fn spawn_mob(
+    commands: &mut Commands,
+    body_mesh: Handle<Mesh>,
+    leg_mesh: Handle<Mesh>,
+    material: Handle<StandardMaterial>,
+    mob_type: MobType,
+    position: Vec3,
+    yaw: f32,
+) {
+    let body_size = mob_type.body_size();
+    let leg_size = mob_type.leg_size();
+
+    let leg_offset_x = body_size.x * 0.35;
+    let leg_offset_z = body_size.z * 0.35;
+    let leg_top_y = leg_size.y;
+
+    let leg_positions = [
+        Vec3::new( leg_offset_x, leg_top_y, -leg_offset_z),
+        Vec3::new(-leg_offset_x, leg_top_y, -leg_offset_z),
+        Vec3::new( leg_offset_x, leg_top_y,  leg_offset_z),
+        Vec3::new(-leg_offset_x, leg_top_y,  leg_offset_z),
+    ];
+
+    let mut leg_pivots: Vec<Entity> = Vec::with_capacity(4);
+
+    for (i, pos) in leg_positions.iter().enumerate() {
+        let leg_mesh_entity = commands.spawn((
+            Mesh3d(leg_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Name::new(format!("LegMesh{}", i)),
+        )).id();
+
+        let pivot_entity = commands.spawn((
+            Transform::from_translation(*pos),
+            Visibility::default(),
+            Name::new(format!("LegPivot{}", i)),
+        )).id();
+
+        commands.entity(pivot_entity).add_children(&[leg_mesh_entity]);
+        leg_pivots.push(pivot_entity);
+    }
+
+    let body_entity = commands.spawn((
+        Mesh3d(body_mesh.clone()),
+        MeshMaterial3d(material.clone()),
+        Name::new("BodyHead"),
+    )).id();
+
+    let root_entity = commands.spawn((
+        Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
+        Visibility::default(),
+        Mob {
+            mob_type,
+            hp: mob_type.max_hp(),
+            max_hp: mob_type.max_hp(),
+            velocity: Vec3::ZERO,
+            on_ground: false,
+            walking: false,
+            wander_timer: 1.0,
+            yaw,
+            target_yaw: yaw,
+            panic_timer: 0.0,
+            hurt_timer: 0.0,
+            walk_phase: 0.0,
+            stuck_timer: 0.0,
+            legs: leg_pivots.clone(),
+        },
+        Name::new(format!("{:?}", mob_type)),
+    )).id();
+
+    let mut all_children = vec![body_entity];
+    all_children.extend(leg_pivots.iter().copied());
+    commands.entity(root_entity).add_children(&all_children);
 }

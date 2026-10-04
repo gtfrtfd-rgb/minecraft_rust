@@ -52,24 +52,6 @@ impl MobType {
         }
     }
 
-    pub fn body_color(self) -> Color {
-        match self {
-            MobType::Pig => Color::srgb(0.93, 0.60, 0.60),
-            MobType::Sheep => Color::srgb(0.93, 0.93, 0.93),
-            MobType::Cow => Color::srgb(0.40, 0.27, 0.13),
-            MobType::Chicken => Color::srgb(0.98, 0.98, 0.98),
-        }
-    }
-
-    pub fn leg_color(self) -> Color {
-        match self {
-            MobType::Pig => Color::srgb(0.78, 0.50, 0.50),
-            MobType::Sheep => Color::srgb(0.28, 0.26, 0.24),
-            MobType::Cow => Color::srgb(0.27, 0.17, 0.08),
-            MobType::Chicken => Color::srgb(0.91, 0.62, 0.12),
-        }
-    }
-
     pub fn body_size(self) -> Vec3 {
         match self {
             MobType::Pig => Vec3::new(0.6, 0.5, 1.0),
@@ -110,11 +92,14 @@ pub struct Mob {
     pub on_ground: bool,
     pub walking: bool,
     pub wander_timer: f32,
-    /// Текущий угол (в радианах) — ХРАНИМ ОТДЕЛЬНО от Transform!
     pub yaw: f32,
     pub target_yaw: f32,
     pub panic_timer: f32,
     pub hurt_timer: f32,
+    pub walk_phase: f32,
+    /// Время подряд, проведённое в заблокированном состоянии
+    pub stuck_timer: f32,
+    pub legs: Vec<Entity>,
 }
 
 // ============================================================
@@ -126,8 +111,12 @@ impl Plugin for MobAiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (mob_movement_system, despawn_dead_mobs)
-                .run_if(in_state(AppState::InGame)),
+            (
+                unstuck_mobs,
+                mob_movement_system,
+                mob_leg_animation_system,
+                despawn_dead_mobs,
+            ).chain().run_if(in_state(AppState::InGame)),
         );
         info!("MobAiPlugin loaded.");
     }
@@ -157,6 +146,68 @@ fn mob_collides(world: &WorldData, px: f32, py: f32, pz: f32, r: f32, h: f32) ->
 }
 
 // ============================================================
+// UNSTUCK — спасение мобов, застрявших в блоках
+// ============================================================
+fn unstuck_mobs(
+    time: Res<Time>,
+    world: Res<WorldData>,
+    mut q: Query<(&mut Transform, &mut Mob)>,
+) {
+    let dt = time.delta_secs().min(0.05);
+
+    for (mut tf, mut mob) in q.iter_mut() {
+        let r = mob.mob_type.radius();
+        let h = mob.mob_type.height();
+        let pos = tf.translation;
+
+        // Стоит ли моб уже в блоке?
+        if mob_collides(&world, pos.x, pos.y, pos.z, r, h) {
+            mob.stuck_timer += dt;
+
+            // Пытаемся поднять на 1 блок вверх, пока не освободимся
+            let mut test_y = pos.y;
+            let mut freed = false;
+            for _ in 0..10 {
+                test_y += 1.0;
+                if !mob_collides(&world, pos.x, test_y, pos.z, r, h) {
+                    freed = true;
+                    break;
+                }
+            }
+            if freed {
+                tf.translation.y = test_y;
+                mob.velocity.y = 0.0;
+                info!("Unstuck mob: moved to y = {:.1}", test_y);
+            }
+        } else {
+            mob.stuck_timer = (mob.stuck_timer - dt).max(0.0);
+        }
+
+        // Если моб застрял надолго (> 3 сек), телепортируем наверх колонки
+        if mob.stuck_timer > 3.0 {
+            let ix = pos.x.floor() as i32;
+            let iz = pos.z.floor() as i32;
+            if let Some(top_y) = highest_solid(&world, ix, iz) {
+                tf.translation.y = (top_y + 1) as f32;
+                mob.velocity = Vec3::ZERO;
+                mob.stuck_timer = 0.0;
+                warn!("Forced teleport stuck mob at ({}, {})", ix, iz);
+            }
+        }
+    }
+}
+
+fn highest_solid(world: &WorldData, x: i32, z: i32) -> Option<i32> {
+    use crate::core::state::SY;
+    for y in (1..SY - 1).rev() {
+        if world.get(x, y, z).is_solid() {
+            return Some(y);
+        }
+    }
+    None
+}
+
+// ============================================================
 // ДВИЖЕНИЕ
 // ============================================================
 fn mob_movement_system(
@@ -174,7 +225,7 @@ fn mob_movement_system(
         if mob.hurt_timer > 0.0 { mob.hurt_timer -= dt; }
         if mob.panic_timer > 0.0 { mob.panic_timer -= dt; }
 
-        // === ВЫБОР ЦЕЛИ ===
+        // Выбор цели
         if mob.panic_timer > 0.0 {
             mob.walking = true;
             if rng.gen_bool(0.02) {
@@ -194,28 +245,25 @@ fn mob_movement_system(
             }
         }
 
-        // === ПЛАВНЫЙ ПОВОРОТ (через НАШУ переменную yaw, не через quat!) ===
+        // Плавный поворот
         let mut dyaw = mob.target_yaw - mob.yaw;
         while dyaw > std::f32::consts::PI { dyaw -= std::f32::consts::TAU; }
         while dyaw < -std::f32::consts::PI { dyaw += std::f32::consts::TAU; }
         mob.yaw += dyaw * (5.0 * dt).min(1.0);
 
-        // Нормализуем (защита от накопления ошибок)
         while mob.yaw > std::f32::consts::TAU { mob.yaw -= std::f32::consts::TAU; }
         while mob.yaw < 0.0 { mob.yaw += std::f32::consts::TAU; }
 
-        // === УСТАНАВЛИВАЕМ РОТАЦИЮ ПРАВИЛЬНО (из угла → кватернион) ===
         tf.rotation = Quat::from_rotation_y(mob.yaw);
 
-        // === СКОРОСТЬ ===
+        // Скорость
         let speed_mult = if mob.panic_timer > 0.0 { 1.6 } else { 1.0 };
         let speed = if mob.walking { mob.mob_type.speed() * speed_mult } else { 0.0 };
 
-        // Направление "вперёд" в Bevy: -Z
         let forward = Vec3::new(-mob.yaw.sin(), 0.0, -mob.yaw.cos());
         let horiz = forward * speed;
 
-        // === ГРАВИТАЦИЯ ===
+        // Гравитация
         mob.velocity.y -= 28.0 * dt;
         if mob.velocity.y < -30.0 { mob.velocity.y = -30.0; }
 
@@ -250,12 +298,42 @@ fn mob_movement_system(
         }
 
         if tf.translation.y < 2.0 {
-            tf.translation.y = 30.0;
+            let ix = tf.translation.x.floor() as i32;
+            let iz = tf.translation.z.floor() as i32;
+            if let Some(top_y) = highest_solid(&world, ix, iz) {
+                tf.translation.y = (top_y + 1) as f32;
+            } else {
+                tf.translation.y = 30.0;
+            }
             mob.velocity = Vec3::ZERO;
         }
 
-        // === МАСШТАБ ВСЕГДА (1,1,1) ===
         tf.scale = Vec3::ONE;
+
+        if mob.walking && mob.on_ground {
+            mob.walk_phase += dt * 8.0 * speed_mult;
+        } else {
+            mob.walk_phase *= (1.0 - dt * 5.0).max(0.0);
+        }
+    }
+}
+
+// ============================================================
+// АНИМАЦИЯ НОГ
+// ============================================================
+fn mob_leg_animation_system(
+    mob_q: Query<&Mob>,
+    mut pivot_q: Query<&mut Transform>,
+) {
+    for mob in mob_q.iter() {
+        let swing = mob.walk_phase.sin() * 0.55;
+
+        for (i, &pivot_entity) in mob.legs.iter().enumerate() {
+            if let Ok(mut tf) = pivot_q.get_mut(pivot_entity) {
+                let phase: f32 = if i < 2 { 1.0 } else { -1.0 };
+                tf.rotation = Quat::from_rotation_x(swing * phase);
+            }
+        }
     }
 }
 
@@ -268,7 +346,7 @@ fn despawn_dead_mobs(
 ) {
     for (entity, mob) in q.iter() {
         if mob.hp <= 0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).despawn_recursive();
         }
     }
 }
