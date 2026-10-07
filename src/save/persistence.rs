@@ -145,7 +145,7 @@ fn auto_save(
 }
 
 fn save_on_exit(
-    mut exit: EventReader<AppExit>,
+    mut exit: MessageReader<AppExit>,
     world: Res<WorldData>,
     seed: Res<WorldSeed>,
     look: Res<PlayerLook>,

@@ -37,7 +37,7 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn camera_follow_and_look(
-    mut motion: EventReader<MouseMotion>,
+    mut motion: MessageReader<MouseMotion>,
     mut look: ResMut<PlayerLook>,
     mut camera_q: Query<&mut Transform, With<PlayerCamera>>,
     player_q: Query<&Transform, (With<Player>, Without<PlayerCamera>)>,

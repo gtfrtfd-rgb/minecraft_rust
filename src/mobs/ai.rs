@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use rand::Rng;
+use rand::RngExt; // Изменено с `rand::Rng`
 
 use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
@@ -205,7 +205,7 @@ fn mob_ai_think(
     mut q: Query<(&Transform, &mut Mob), Without<Player>>,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng(); // Изменено с `rand::thread_rng()`
 
     let player_pos = player_q.single().ok().map(|t| t.translation);
 
@@ -241,53 +241,53 @@ fn mob_ai_think(
 
                 if mob.state != MobState::Alert {
                     mob.state = MobState::Alert;
-                    mob.state_timer = rng.gen_range(4.0..9.0);
+                    mob.state_timer = rng.random_range(4.0..9.0); // Изменено
                     mob.alert_looking = true;
                     mob.alert_walking = false;
-                    mob.alert_look_timer = rng.gen_range(1.0..2.5);
+                    mob.alert_look_timer = rng.random_range(1.0..2.5); // Изменено
                 }
 
                 if mob.alert_look_timer <= 0.0 {
                     if mob.alert_looking {
                         mob.alert_looking = false;
 
-                        if rng.gen_bool(0.6) {
+                        if rng.random_bool(0.6) { // Изменено
                             mob.alert_walking = true;
                             let away_yaw = yaw_to_player
                                 + std::f32::consts::PI
-                                + rng.gen_range(-0.8..0.8);
+                                + rng.random_range(-0.8..0.8); // Изменено
                             mob.target_yaw = away_yaw;
-                            mob.alert_look_timer = rng.gen_range(1.5..3.5);
+                            mob.alert_look_timer = rng.random_range(1.5..3.5); // Изменено
                         } else {
                             mob.alert_walking = false;
-                            let offset = rng.gen_range(-1.8..1.8);
+                            let offset = rng.random_range(-1.8..1.8); // Изменено
                             mob.target_yaw = yaw_to_player + offset;
-                            mob.alert_look_timer = rng.gen_range(0.8..2.0);
+                            mob.alert_look_timer = rng.random_range(0.8..2.0); // Изменено
                         }
                     } else {
                         if mob.alert_walking {
-                            if rng.gen_bool(0.5) {
+                            if rng.random_bool(0.5) { // Изменено
                                 mob.alert_looking = true;
                                 mob.alert_walking = false;
-                                mob.alert_look_timer = rng.gen_range(0.8..2.0);
+                                mob.alert_look_timer = rng.random_range(0.8..2.0); // Изменено
                             } else {
                                 let new_yaw = yaw_to_player
                                     + std::f32::consts::PI
-                                    + rng.gen_range(-1.2..1.2);
+                                    + rng.random_range(-1.2..1.2); // Изменено
                                 mob.target_yaw = new_yaw;
-                                mob.alert_look_timer = rng.gen_range(1.0..2.5);
+                                mob.alert_look_timer = rng.random_range(1.0..2.5); // Изменено
                             }
                         } else {
-                            if rng.gen_bool(0.7) {
+                            if rng.random_bool(0.7) { // Изменено
                                 mob.alert_looking = true;
-                                mob.alert_look_timer = rng.gen_range(0.8..2.0);
+                                mob.alert_look_timer = rng.random_range(0.8..2.0); // Изменено
                             } else {
                                 mob.alert_walking = true;
                                 let away_yaw = yaw_to_player
                                     + std::f32::consts::PI
-                                    + rng.gen_range(-0.8..0.8);
+                                    + rng.random_range(-0.8..0.8); // Изменено
                                 mob.target_yaw = away_yaw;
-                                mob.alert_look_timer = rng.gen_range(1.5..3.5);
+                                mob.alert_look_timer = rng.random_range(1.5..3.5); // Изменено
                             }
                         }
                     }
@@ -305,8 +305,8 @@ fn mob_ai_think(
 
                 if mob.state_timer <= 0.0 {
                     mob.state = MobState::Wander;
-                    mob.target_yaw = rng.gen_range(0.0..std::f32::consts::TAU);
-                    mob.state_timer = rng.gen_range(3.0..6.0);
+                    mob.target_yaw = rng.random_range(0.0..std::f32::consts::TAU); // Изменено
+                    mob.state_timer = rng.random_range(3.0..6.0); // Изменено
                     mob.alert_looking = false;
                     mob.alert_walking = false;
                 }
@@ -322,21 +322,21 @@ fn mob_ai_think(
             match mob.state {
                 MobState::Idle => {
                     mob.state = MobState::Wander;
-                    mob.target_yaw = rng.gen_range(0.0..std::f32::consts::TAU);
-                    mob.state_timer = rng.gen_range(3.0..6.0);
+                    mob.target_yaw = rng.random_range(0.0..std::f32::consts::TAU); // Изменено
+                    mob.state_timer = rng.random_range(3.0..6.0); // Изменено
                 }
                 MobState::Wander => {
-                    if rng.gen_bool(0.4) {
+                    if rng.random_bool(0.4) { // Изменено
                         mob.state = MobState::Idle;
-                        mob.state_timer = rng.gen_range(1.5..3.5);
+                        mob.state_timer = rng.random_range(1.5..3.5); // Изменено
                     } else {
-                        mob.target_yaw = rng.gen_range(0.0..std::f32::consts::TAU);
-                        mob.state_timer = rng.gen_range(3.0..6.0);
+                        mob.target_yaw = rng.random_range(0.0..std::f32::consts::TAU); // Изменено
+                        mob.state_timer = rng.random_range(3.0..6.0); // Изменено
                     }
                 }
                 _ => {
                     mob.state = MobState::Idle;
-                    mob.state_timer = rng.gen_range(1.0..2.0);
+                    mob.state_timer = rng.random_range(1.0..2.0); // Изменено
                 }
             }
         }
@@ -350,7 +350,7 @@ fn mob_movement_and_separation(
     mut q: Query<(Entity, &mut Transform, &mut Mob), Without<Player>>,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng(); // Изменено
     let player_pos = player_q.single().ok().map(|t| t.translation);
 
     let snapshots: Vec<(Entity, Vec3, f32)> = q
@@ -410,13 +410,13 @@ fn mob_movement_and_separation(
                     mob.velocity.y = 8.5;
                     mob.jump_cooldown = 0.6;
                 } else {
-                    let turn_choice = rng.gen_range(0..3);
+                    let turn_choice = rng.random_range(0..3); // Изменено
                     let turn_angle: f32 = match turn_choice {
                         0 => std::f32::consts::FRAC_PI_2,
                         1 => -std::f32::consts::FRAC_PI_2,
                         _ => std::f32::consts::PI,
                     };
-                    mob.target_yaw = mob.yaw + turn_angle + rng.gen_range(-0.3..0.3);
+                    mob.target_yaw = mob.yaw + turn_angle + rng.random_range(-0.3..0.3); // Изменено
                     mob.state_timer = mob.state_timer.max(1.0);
                 }
             }
@@ -492,8 +492,8 @@ fn mob_movement_and_separation(
             let expected = speed * dt;
 
             if expected > 0.001 && moved < expected * 0.3 {
-                let turn = rng.gen_range(1.5..3.0)
-                    * if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
+                let turn = rng.random_range(1.5..3.0) // Изменено
+                    * if rng.random_bool(0.5) { 1.0 } else { -1.0 }; // Изменено
                 mob.target_yaw = mob.yaw + turn;
                 mob.state_timer = mob.state_timer.max(0.8);
             }

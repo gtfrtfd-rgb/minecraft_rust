@@ -21,12 +21,12 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Minecraft Rust".to_string(),
-                resolution: (1280.0_f32, 720.0_f32).into(),
-                cursor_options: CursorOptions {
-                    visible: true,
-                    grab_mode: CursorGrabMode::None,
-                    ..default()
-                },
+                resolution: (1280_u32, 720_u32).into(),
+                ..default()
+            }),
+            primary_cursor_options: Some(CursorOptions {
+                visible: true,
+                grab_mode: CursorGrabMode::None,
                 ..default()
             }),
             ..default()

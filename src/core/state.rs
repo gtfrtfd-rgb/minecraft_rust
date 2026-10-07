@@ -59,7 +59,7 @@ impl Plugin for GameStatePlugin {
 
 fn handle_slot_input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: EventReader<MouseWheel>,
+    mut wheel: MessageReader<MouseWheel>, // Уже изменено на MessageReader
     mut selected: ResMut<SelectedSlot>,
 ) {
     use KeyCode::*;

@@ -28,6 +28,7 @@
 
 ### 🐷 Мобы
 - **4 типа** — свинья, овца, корова, курица
+- **Пиксельные текстуры в стиле MC** — процедурный атлас 4×4 (16×16 тайлов), шум в стиле оригинального Minecraft
 - **Процедурные меши** — тело, голова, глаза, пятачок, рога, гребень, клюв
 - **AI на 4 состояния** — Idle / Wander / Alert / Flee
 - **Реагируют на игрока**:
@@ -70,13 +71,10 @@
 
 ### Требования
 
-- **Rust** — установить с rustup.rs
-- **MSVC Build Tools** (Windows) — скачать с visualstudio.microsoft.com
-- **Linux-зависимости** — выполнить в терминале:
+- **Rust** — установить с [rustup.rs](https://rustup.rs)
+- **MSVC Build Tools** (Windows) — скачать с [visualstudio.microsoft.com](https://visualstudio.microsoft.com)
 
-      sudo apt install pkg-config libx11-dev libxcursor-dev libxrandr-dev \
-                       libxi-dev libxinerama-dev libgl1-mesa-dev \
-                       libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+> ℹ️ Сборка настроена только под **Windows** (см. CI). Для сборки на Linux/macOS потребуется добавить Linux-зависимости (Bevy) и расширить матрицу в `.github/workflows/build.yml`.
 
 ### Сборка и запуск
 
@@ -91,7 +89,7 @@
 ## 📁 Структура проекта
 
     minecraft_rust/
-    ├── .github/workflows/build.yml    # CI для Win/Linux/macOS
+    ├── .github/workflows/build.yml    # CI только для Windows
     ├── src/
     │   ├── main.rs                    # Точка входа
     │   ├── core/state.rs              # Состояния (Menu/InGame/Paused)
@@ -106,7 +104,7 @@
     │   │   └── breaking.rs            # Ломание/установка/атака
     │   ├── mobs/
     │   │   ├── ai.rs                  # AI + анимация ног
-    │   │   └── spawn.rs               # Процедурные меши + спавн
+    │   │   └── spawn.rs               # Процедурные меши + пиксельные текстуры + спавн
     │   ├── ui/
     │   │   ├── menu.rs                # Главное меню + пауза
     │   │   ├── hotbar.rs              # Хотбар
@@ -137,12 +135,13 @@
 
 | Компонент | Технология |
 |---|---|
-| Язык | Rust 1.75+ |
-| Движок | Bevy 0.15 |
-| Графика | wgpu (Vulkan/Metal/DX12) |
+| Язык | Rust 1.85+ |
+| Движок | Bevy 0.19 |
+| Графика | wgpu (Vulkan / DX12) |
 | Шум | noise (Perlin) |
+| Случайность | rand 0.10 |
 | Сохранения | serde + serde_json + RLE |
-| CI/CD | GitHub Actions |
+| CI/CD | GitHub Actions (Windows) |
 
 ---
 
@@ -152,9 +151,9 @@
 - [x] Ломание и установка блоков
 - [x] Хотбар + HUD
 - [x] Система сохранений
-- [x] Автоматическая сборка под 4 платформы
 - [x] Главное меню + пауза
 - [x] Мобы с AI
+- [x] Пиксельные текстуры мобов в стиле MC
 - [ ] Бесконечный мир (chunk streaming)
 - [ ] Звуковые эффекты (шаги, ломание, мычание)
 - [ ] Цикл дня и ночи

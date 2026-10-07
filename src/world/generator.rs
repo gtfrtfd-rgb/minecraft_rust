@@ -160,10 +160,6 @@ fn load_or_generate(
     trees_planted += plant_trees(&mut world, &heights, &biomes, &mut rng,
         30, Biome::Mountain, TreeKind::Pine);
 
-    // НИКАКОЙ стены — физический барьер обеспечивает
-    // WorldData::is_solid() (возвращает true за пределами мира).
-    // Визуально граница скрыта туманом (см. camera.rs).
-
     info!(
         "Terrain generated in {:?}: {} blocks, {} trees",
         t0.elapsed(),

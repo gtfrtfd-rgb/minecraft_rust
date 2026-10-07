@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
-use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use rand::Rng;
+use rand::RngExt; // Изменено
 
 use crate::core::state::{SX, SY, SZ};
 use crate::world::chunk::WorldData;
@@ -463,7 +463,7 @@ fn spawn_initial_mobs(
     let cow_leg     = meshes.add(build_leg_mesh(MobType::Cow));
     let chicken_leg = meshes.add(build_leg_mesh(MobType::Chicken));
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng(); // Изменено
     let types = [MobType::Pig, MobType::Sheep, MobType::Cow, MobType::Chicken];
 
     let mut spawned = 0;
@@ -473,8 +473,8 @@ fn spawn_initial_mobs(
     while spawned < INITIAL_MOB_COUNT && attempts < max_attempts {
         attempts += 1;
 
-        let x = rng.gen_range(4..SX - 4);
-        let z = rng.gen_range(4..SZ - 4);
+        let x = rng.random_range(4..SX - 4); // Изменено
+        let z = rng.random_range(4..SZ - 4); // Изменено
 
         let dx = (x as f32 + 0.5) - player_pos.x;
         let dz = (z as f32 + 0.5) - player_pos.z;
@@ -512,7 +512,7 @@ fn spawn_initial_mobs(
         }
         if !free { continue; }
 
-        let mob_type = types[rng.gen_range(0..types.len())];
+        let mob_type = types[rng.random_range(0..types.len())]; // Изменено
         let (body_mesh, leg_mesh, material) = match mob_type {
             MobType::Pig     => (pig_body.clone(),     pig_leg.clone(),     pig_mat.clone()),
             MobType::Sheep   => (sheep_body.clone(),   sheep_leg.clone(),   sheep_mat.clone()),
@@ -520,7 +520,7 @@ fn spawn_initial_mobs(
             MobType::Chicken => (chicken_body.clone(), chicken_leg.clone(), chicken_mat.clone()),
         };
 
-        let yaw = rng.gen_range(0.0..std::f32::consts::TAU);
+        let yaw = rng.random_range(0.0..std::f32::consts::TAU); // Изменено
 
         spawn_mob(
             &mut commands,

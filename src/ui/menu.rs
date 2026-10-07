@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use bevy::window::{CursorGrabMode, PrimaryWindow, Window};
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use crate::core::state::AppState;
 
 #[derive(Component)]
@@ -53,14 +53,14 @@ macro_rules! menu_button {
                     ..default()
                 },
                 BackgroundColor(BTN_NORMAL),
-                BorderColor(BORDER_NORMAL),
+                BorderColor::all(BORDER_NORMAL),
                 $action,
             ))
             .with_children(|b| {
                 b.spawn((
                     Text::new($label),
                     TextFont {
-                        font_size: 30.0,
+                        font_size: FontSize::Px(30.0), // Изменено
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -93,7 +93,7 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("MINECRAFT RUST"),
                 TextFont {
-                    font_size: 82.0,
+                    font_size: FontSize::Px(82.0), // Изменено
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
@@ -101,7 +101,7 @@ fn spawn_menus(mut commands: Commands) {
 
             root.spawn((
                 TextFont {
-                    font_size: 16.0,
+                    font_size: FontSize::Px(16.0), // Изменено
                     ..default()
                 },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
@@ -137,7 +137,7 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("PAUSED"),
                 TextFont {
-                    font_size: 72.0,
+                    font_size: FontSize::Px(72.0), // Изменено
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -160,7 +160,7 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("Press ESC to resume"),
                 TextFont {
-                    font_size: 14.0,
+                    font_size: FontSize::Px(14.0), // Изменено
                     ..default()
                 },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
@@ -194,7 +194,7 @@ fn handle_menu_buttons(
         (Changed<Interaction>, With<Button>),
     >,
     mut next_state: ResMut<NextState<AppState>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for (interaction, action, mut bg, mut border) in q.iter_mut() {
         match *interaction {
@@ -214,11 +214,11 @@ fn handle_menu_buttons(
             },
             Interaction::Hovered => {
                 *bg = BackgroundColor(BTN_HOVER);
-                *border = BorderColor(BORDER_HOVER);
+                *border = BorderColor::all(BORDER_HOVER);
             }
             Interaction::None => {
                 *bg = BackgroundColor(BTN_NORMAL);
-                *border = BorderColor(BORDER_NORMAL);
+                *border = BorderColor::all(BORDER_NORMAL);
             }
         }
     }
@@ -249,7 +249,7 @@ fn handle_escape_key(
 
 fn update_cursor_for_state(
     state: Res<State<AppState>>,
-    mut window_q: Query<&mut Window, With<PrimaryWindow>>,
+    mut cursor_q: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !state.is_changed() {
         return;
@@ -261,9 +261,9 @@ fn update_cursor_for_state(
         AppState::Menu   => (true,  CursorGrabMode::None),
     };
 
-    for mut window in window_q.iter_mut() {
-        window.cursor_options.visible = visible;
-        window.cursor_options.grab_mode = mode;
+    for mut cursor in cursor_q.iter_mut() {
+        cursor.visible = visible;
+        cursor.grab_mode = mode;
     }
 
     info!("Cursor updated: visible={}, mode={:?}", visible, mode);

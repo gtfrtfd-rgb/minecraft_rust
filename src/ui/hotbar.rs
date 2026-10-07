@@ -59,14 +59,14 @@ fn setup_hotbar(mut commands: Commands) {
                                 ..default()
                             },
                             BackgroundColor(block.icon_color()),
-                            BorderColor(Color::srgb(0.35, 0.35, 0.35)),
+                            BorderColor::all(Color::srgb(0.35, 0.35, 0.35)),
                             HotbarSlot { index: i },
                         ))
                         .with_children(|slot| {
                             slot.spawn((
                                 Text::new(format!("{}", i + 1)),
                                 TextFont {
-                                    font_size: 14.0,
+                                    font_size: FontSize::Px(14.0), // Изменено
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -95,10 +95,10 @@ fn update_hotbar_highlight(
         if slot.index == selected.0 {
             let base = HOTBAR[slot.index].icon_color();
             bg.0 = lighten(base, 0.3);
-            *border = BorderColor(Color::WHITE);
+            *border = BorderColor::all(Color::WHITE);
         } else {
             bg.0 = HOTBAR[slot.index].icon_color();
-            *border = BorderColor(Color::srgb(0.35, 0.35, 0.35));
+            *border = BorderColor::all(Color::srgb(0.35, 0.35, 0.35));
         }
     }
 }

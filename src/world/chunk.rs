@@ -1,10 +1,11 @@
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
-use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::Face;
-use bevy::render::view::NoFrustumCulling;
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::light::GlobalAmbientLight;
 use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
 
 #[repr(u8)]
@@ -420,7 +421,7 @@ pub struct ChunkPlugin;
 
 impl Plugin for ChunkPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AmbientLight {
+        app.insert_resource(GlobalAmbientLight {
             color: Color::WHITE,
             brightness: 1200.0,
             affects_lightmapped_meshes: true,
@@ -501,7 +502,7 @@ fn spawn_all_chunks(
     commands.spawn((
         DirectionalLight {
             illuminance: 8000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false, // Изменено
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
@@ -510,7 +511,7 @@ fn spawn_all_chunks(
     commands.spawn((
         DirectionalLight {
             illuminance: 4000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false, // Изменено
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 0.8, 2.5, 0.0)),

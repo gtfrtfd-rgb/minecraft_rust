@@ -129,7 +129,7 @@ fn draw_target_highlight(
     }
 
     let center = bmin + Vec3::splat(0.5);
-    gizmos.cuboid(
+    gizmos.cube(
         Transform::from_translation(center).with_scale(Vec3::splat(1.002)),
         Color::BLACK,
     );

@@ -92,7 +92,7 @@ fn setup_hud(mut commands: Commands) {
         parent.spawn((
             Text::new("XYZ: 0.0 / 0.0 / 0.0"),
             TextFont {
-                font_size: 20.0,
+                font_size: FontSize::Px(20.0), // Изменено
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -101,7 +101,7 @@ fn setup_hud(mut commands: Commands) {
         parent.spawn((
             Text::new("FPS: --"),
             TextFont {
-                font_size: 18.0,
+                font_size: FontSize::Px(18.0), // Изменено
                 ..default()
             },
             TextColor(Color::srgb(0.85, 0.95, 0.65)),
@@ -109,7 +109,7 @@ fn setup_hud(mut commands: Commands) {
         ));
         parent.spawn((
             TextFont {
-                font_size: 14.0,
+                font_size: FontSize::Px(14.0), // Изменено
                 ..default()
             },
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
@@ -124,7 +124,7 @@ fn setup_hud(mut commands: Commands) {
              1-9 / MouseWheel - slot   Esc - pause",
         ),
         TextFont {
-            font_size: 14.0,
+            font_size: FontSize::Px(14.0), // Изменено
             ..default()
         },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
@@ -134,7 +134,7 @@ fn setup_hud(mut commands: Commands) {
             top: Val::Px(10.0),
             ..default()
         },
-        TextLayout::new_with_justify(JustifyText::Right),
+        TextLayout::justify(Justify::Right), // Изменено
         HudRoot,
         Name::new("HudHelp"),
     ));
