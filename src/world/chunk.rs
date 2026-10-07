@@ -173,16 +173,6 @@ impl WorldData {
         if z < 0 || z >= SZ { return true; }  // невидимая стена по Z
         self.get(x, y, z).is_solid()
     }
-
-    #[allow(dead_code)]
-    pub fn highest_at(&self, x: i32, z: i32) -> i32 {
-        for y in (0..SY).rev() {
-            if self.get(x, y, z).is_solid() {
-                return y;
-            }
-        }
-        -1
-    }
 }
 
 #[derive(Resource, Default)]

@@ -5,7 +5,6 @@ use crate::core::state::{WorldSeed, SX, SZ, SY};
 use crate::save::persistence::{LoadedSave, rle_decode};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)]
 enum Biome {
     Plains,
     Forest,
