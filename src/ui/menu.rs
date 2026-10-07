@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::app::AppExit;
 use bevy::window::{CursorGrabMode, CursorOptions, Window};
 use crate::core::state::AppState;
-use crate::GAME_VERSION;
 
 // ============================================================
 // КОМПОНЕНТЫ
@@ -121,7 +120,6 @@ fn spawn_menus(mut commands: Commands) {
             ));
 
             root.spawn((
-                Text::new(format!("v{}", GAME_VERSION)),
                 TextFont {
                     font_size: 16.0,
                     ..default()

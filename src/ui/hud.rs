@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use crate::core::state::AppState;
 use crate::player::controller::Player;
-use crate::GAME_VERSION;
 
 #[derive(Component)]
 struct CoordsText;
@@ -113,7 +112,6 @@ fn setup_hud(mut commands: Commands) {
             FpsText,
         ));
         parent.spawn((
-            Text::new(format!("Minecraft Rust v{}", GAME_VERSION)),
             TextFont {
                 font_size: 14.0,
                 ..default()

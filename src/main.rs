@@ -16,13 +16,11 @@ use mobs::MobPlugin;
 use ui::UiPlugin;
 use save::SavePlugin;
 
-pub const GAME_VERSION: &str = env!("CARGO_PKG_VERSION");
-
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: format!("Minecraft Rust — v{}", GAME_VERSION),
+                title: format!("Minecraft Rust"),
                 resolution: (1280.0_f32, 720.0_f32).into(),
                 // При старте — Menu. Курсор видим, не захвачен.
                 cursor_options: CursorOptions {
