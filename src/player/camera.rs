@@ -12,7 +12,6 @@ pub struct PlayerCameraPlugin;
 impl Plugin for PlayerCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_camera)
-            // Слежение и обзор — только в игре
             .add_systems(
                 Update,
                 camera_follow_and_look.run_if(in_state(AppState::InGame)),
@@ -53,8 +52,8 @@ fn camera_follow_and_look(
     }
 
     let rot = Quat::from_euler(EulerRot::YXZ, look.yaw, look.pitch, 0.0);
-    if let Ok(p_tf) = player_q.get_single() {
-        if let Ok(mut c_tf) = camera_q.get_single_mut() {
+    if let Ok(p_tf) = player_q.single() {
+        if let Ok(mut c_tf) = camera_q.single_mut() {
             c_tf.translation = p_tf.translation + Vec3::new(0.0, 1.62, 0.0);
             c_tf.rotation = rot;
         }

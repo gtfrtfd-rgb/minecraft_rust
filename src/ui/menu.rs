@@ -1,11 +1,8 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use bevy::window::{CursorGrabMode, CursorOptions, Window};
+use bevy::window::{CursorGrabMode, PrimaryWindow, Window};
 use crate::core::state::AppState;
 
-// ============================================================
-// КОМПОНЕНТЫ
-// ============================================================
 #[derive(Component)]
 struct MainMenuRoot;
 
@@ -20,25 +17,18 @@ enum MenuAction {
     ExitGame,
 }
 
-// Цвета кнопок
 const BTN_NORMAL: Color   = Color::srgb(0.18, 0.26, 0.38);
 const BTN_HOVER:  Color   = Color::srgb(0.30, 0.50, 0.72);
 const BORDER_NORMAL: Color = Color::srgba(1.0, 1.0, 1.0, 0.25);
 const BORDER_HOVER:  Color = Color::WHITE;
 
-// ============================================================
-// ПЛАГИН
-// ============================================================
 pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app
-            // Оба меню создаются один раз при старте (невидимые)
             .add_systems(Startup, spawn_menus)
-            // При смене состояния — переключаем видимость
             .add_systems(Update, toggle_menu_visibility)
-            // Общие системы
             .add_systems(Update, (
                 handle_menu_buttons,
                 handle_escape_key,
@@ -48,9 +38,6 @@ impl Plugin for MenuPlugin {
     }
 }
 
-// ============================================================
-// МАКРОС для кнопок
-// ============================================================
 macro_rules! menu_button {
     ($parent:expr, $action:expr, $label:expr) => {
         $parent
@@ -82,15 +69,9 @@ macro_rules! menu_button {
     };
 }
 
-// ============================================================
-// СПАВН ОБОИХ МЕНЮ ПРИ СТАРТЕ
-// ============================================================
 fn spawn_menus(mut commands: Commands) {
     info!("Spawning menus");
 
-    // ─────────────────────────────────────────────
-    // ГЛАВНОЕ МЕНЮ (видимо по умолчанию — AppState::Menu)
-    // ─────────────────────────────────────────────
     commands
         .spawn((
             Node {
@@ -101,7 +82,6 @@ fn spawn_menus(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 row_gap: Val::Px(10.0),
-                // Изначально — Menu, значит видимо
                 display: Display::Flex,
                 ..default()
             },
@@ -136,9 +116,6 @@ fn spawn_menus(mut commands: Commands) {
             menu_button!(root, MenuAction::ExitGame, "EXIT");
         });
 
-    // ─────────────────────────────────────────────
-    // МЕНЮ ПАУЗЫ (скрыто по умолчанию)
-    // ─────────────────────────────────────────────
     commands
         .spawn((
             Node {
@@ -191,9 +168,6 @@ fn spawn_menus(mut commands: Commands) {
         });
 }
 
-// ============================================================
-// ПЕРЕКЛЮЧЕНИЕ ВИДИМОСТИ
-// ============================================================
 fn toggle_menu_visibility(
     state: Res<State<AppState>>,
     mut main_q:  Query<&mut Node, (With<MainMenuRoot>,  Without<PauseMenuRoot>)>,
@@ -214,9 +188,6 @@ fn toggle_menu_visibility(
     }
 }
 
-// ============================================================
-// ОБРАБОТКА КНОПОК
-// ============================================================
 fn handle_menu_buttons(
     mut q: Query<
         (&Interaction, &MenuAction, &mut BackgroundColor, &mut BorderColor),
@@ -238,7 +209,7 @@ fn handle_menu_buttons(
                 }
                 MenuAction::ExitGame => {
                     info!("Menu action: Quit game");
-                    exit.send(AppExit::Success);
+                    exit.write(AppExit::Success);
                 }
             },
             Interaction::Hovered => {
@@ -253,9 +224,6 @@ fn handle_menu_buttons(
     }
 }
 
-// ============================================================
-// ESCAPE — пауза / возврат
-// ============================================================
 fn handle_escape_key(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<AppState>>,
@@ -275,17 +243,13 @@ fn handle_escape_key(
             next_state.set(AppState::InGame);
         }
         AppState::Menu => {
-            // В главном меню Escape ничего не делает
         }
     }
 }
 
-// ============================================================
-// КУРСОР — в зависимости от состояния
-// ============================================================
 fn update_cursor_for_state(
     state: Res<State<AppState>>,
-    mut window_q: Query<&mut Window>,
+    mut window_q: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if !state.is_changed() {
         return;
@@ -298,11 +262,8 @@ fn update_cursor_for_state(
     };
 
     for mut window in window_q.iter_mut() {
-        window.cursor_options = CursorOptions {
-            visible,
-            grab_mode: mode,
-            ..default()
-        };
+        window.cursor_options.visible = visible;
+        window.cursor_options.grab_mode = mode;
     }
 
     info!("Cursor updated: visible={}, mode={:?}", visible, mode);

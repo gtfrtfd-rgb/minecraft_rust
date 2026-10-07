@@ -5,9 +5,6 @@ use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 
-// ============================================================
-// ТИПЫ МОБОВ
-// ============================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MobType {
     Pig,
@@ -90,9 +87,6 @@ impl MobType {
     }
 }
 
-// ============================================================
-// СОСТОЯНИЯ AI
-// ============================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MobState {
     Idle,
@@ -101,9 +95,6 @@ pub enum MobState {
     Flee,
 }
 
-// ============================================================
-// КОМПОНЕНТ
-// ============================================================
 #[derive(Component)]
 pub struct Mob {
     pub mob_type: MobType,
@@ -125,11 +116,8 @@ pub struct Mob {
     pub stuck_timer: f32,
     pub jump_cooldown: f32,
 
-    /// Alert: смотрит ли сейчас на игрока
     pub alert_looking: bool,
-    /// Alert: идёт ли сейчас (в сторону, без разворота к игроку)
     pub alert_walking: bool,
-    /// Alert: таймер текущего подсостояния
     pub alert_look_timer: f32,
 
     pub legs: Vec<Entity>,
@@ -161,9 +149,6 @@ impl Mob {
     }
 }
 
-// ============================================================
-// ПЛАГИН
-// ============================================================
 pub struct MobAiPlugin;
 
 impl Plugin for MobAiPlugin {
@@ -184,9 +169,6 @@ impl Plugin for MobAiPlugin {
     }
 }
 
-// ============================================================
-// ХЕЛПЕРЫ
-// ============================================================
 fn mob_collides(world: &WorldData, px: f32, py: f32, pz: f32, r: f32, h: f32) -> bool {
     let x0 = (px - r).floor() as i32;
     let x1 = (px + r).floor() as i32;
@@ -217,9 +199,6 @@ fn highest_solid(world: &WorldData, x: i32, z: i32) -> Option<i32> {
     None
 }
 
-// ============================================================
-// AI: ПРИНЯТИЕ РЕШЕНИЙ
-// ============================================================
 fn mob_ai_think(
     time: Res<Time>,
     player_q: Query<&Transform, With<Player>>,
@@ -228,7 +207,7 @@ fn mob_ai_think(
     let dt = time.delta_secs().min(0.05);
     let mut rng = rand::thread_rng();
 
-    let player_pos = player_q.get_single().ok().map(|t| t.translation);
+    let player_pos = player_q.single().ok().map(|t| t.translation);
 
     for (tf, mut mob) in q.iter_mut() {
         let my_pos = tf.translation;
@@ -246,7 +225,6 @@ fn mob_ai_think(
             })
             .unwrap_or(f32::MAX);
 
-        // === ПРИОРИТЕТ 1: Паника ===
         if mob.panic_timer > 0.0 {
             mob.state = MobState::Flee;
             mob.state_timer = mob.panic_timer;
@@ -255,14 +233,12 @@ fn mob_ai_think(
             continue;
         }
 
-        // === ПРИОРИТЕТ 2: Игрок рядом ===
         if let Some(ppos) = player_pos {
             if dist_to_player < mob.mob_type.notice_range() {
                 let dx = ppos.x - my_pos.x;
                 let dz = ppos.z - my_pos.z;
                 let yaw_to_player = (-dx).atan2(-dz);
 
-                // Первое обнаружение
                 if mob.state != MobState::Alert {
                     mob.state = MobState::Alert;
                     mob.state_timer = rng.gen_range(4.0..9.0);
@@ -271,16 +247,12 @@ fn mob_ai_think(
                     mob.alert_look_timer = rng.gen_range(1.0..2.5);
                 }
 
-                // === ЧЕРЕДОВАНИЕ: смотрит / отводит / уходит ===
                 if mob.alert_look_timer <= 0.0 {
                     if mob.alert_looking {
-                        // Был смотрящим → переключаемся
                         mob.alert_looking = false;
 
-                        // 60% идём, 40% просто отводим взгляд
                         if rng.gen_bool(0.6) {
                             mob.alert_walking = true;
-                            // Идём ОТ игрока или вбок
                             let away_yaw = yaw_to_player
                                 + std::f32::consts::PI
                                 + rng.gen_range(-0.8..0.8);
@@ -288,21 +260,17 @@ fn mob_ai_think(
                             mob.alert_look_timer = rng.gen_range(1.5..3.5);
                         } else {
                             mob.alert_walking = false;
-                            // Взгляд в сторону
                             let offset = rng.gen_range(-1.8..1.8);
                             mob.target_yaw = yaw_to_player + offset;
                             mob.alert_look_timer = rng.gen_range(0.8..2.0);
                         }
                     } else {
-                        // Был НЕ смотрящим → решаем дальше
                         if mob.alert_walking {
-                            // Ходил → либо продолжаем, либо останавливаемся и смотрим
                             if rng.gen_bool(0.5) {
                                 mob.alert_looking = true;
                                 mob.alert_walking = false;
                                 mob.alert_look_timer = rng.gen_range(0.8..2.0);
                             } else {
-                                // Новое направление "куда-нибудь"
                                 let new_yaw = yaw_to_player
                                     + std::f32::consts::PI
                                     + rng.gen_range(-1.2..1.2);
@@ -310,12 +278,10 @@ fn mob_ai_think(
                                 mob.alert_look_timer = rng.gen_range(1.0..2.5);
                             }
                         } else {
-                            // Отводил взгляд → смотрим снова (с вероятностью 70%)
                             if rng.gen_bool(0.7) {
                                 mob.alert_looking = true;
                                 mob.alert_look_timer = rng.gen_range(0.8..2.0);
                             } else {
-                                // Или начинаем уходить
                                 mob.alert_walking = true;
                                 let away_yaw = yaw_to_player
                                     + std::f32::consts::PI
@@ -327,7 +293,6 @@ fn mob_ai_think(
                     }
                 }
 
-                // Пока смотрит — плавно подводим yaw к игроку
                 if mob.alert_looking {
                     let current_target = mob.target_yaw;
                     let mut diff = yaw_to_player - current_target;
@@ -335,11 +300,9 @@ fn mob_ai_think(
                     while diff < -std::f32::consts::PI { diff += std::f32::consts::TAU; }
                     mob.target_yaw = current_target + diff * (3.0 * dt).min(1.0);
                 }
-                // Пока идёт — target_yaw не меняем (идёт куда решил)
 
                 mob.state_timer -= dt;
 
-                // Пора сбросить Alert
                 if mob.state_timer <= 0.0 {
                     mob.state = MobState::Wander;
                     mob.target_yaw = rng.gen_range(0.0..std::f32::consts::TAU);
@@ -351,11 +314,9 @@ fn mob_ai_think(
             }
         }
 
-        // Игрок далеко — сбрасываем Alert-подсостояния
         mob.alert_looking = false;
         mob.alert_walking = false;
 
-        // === ПРИОРИТЕТ 3: Блуждание ===
         mob.state_timer -= dt;
         if mob.state_timer <= 0.0 {
             match mob.state {
@@ -382,9 +343,6 @@ fn mob_ai_think(
     }
 }
 
-// ============================================================
-// ДВИЖЕНИЕ + РАСТАЛКИВАНИЕ
-// ============================================================
 fn mob_movement_and_separation(
     time: Res<Time>,
     world: Res<WorldData>,
@@ -393,7 +351,7 @@ fn mob_movement_and_separation(
 ) {
     let dt = time.delta_secs().min(0.05);
     let mut rng = rand::thread_rng();
-    let player_pos = player_q.get_single().ok().map(|t| t.translation);
+    let player_pos = player_q.single().ok().map(|t| t.translation);
 
     let snapshots: Vec<(Entity, Vec3, f32)> = q
         .iter()
@@ -408,7 +366,6 @@ fn mob_movement_and_separation(
             MobState::Idle => (0.0, false),
             MobState::Alert => {
                 if mob.alert_walking {
-                    // Идёт медленно, оглядываясь
                     (mob.mob_type.speed() * 0.55, true)
                 } else {
                     (0.0, false)
@@ -429,7 +386,6 @@ fn mob_movement_and_separation(
         while dyaw > std::f32::consts::PI { dyaw -= std::f32::consts::TAU; }
         while dyaw < -std::f32::consts::PI { dyaw += std::f32::consts::TAU; }
 
-        // Плавный поворот (в Alert чуть медленнее)
         let turn_speed = if mob.state == MobState::Alert { 6.0 } else { 5.0 };
         mob.yaw += dyaw * (turn_speed * dt).min(1.0);
 
@@ -438,7 +394,6 @@ fn mob_movement_and_separation(
 
         tf.rotation = Quat::from_rotation_y(mob.yaw);
 
-        // Обход препятствий
         if allow_move && mob.on_ground {
             let forward = Vec3::new(-mob.yaw.sin(), 0.0, -mob.yaw.cos());
             let test_dist = r + 0.15;
@@ -507,7 +462,6 @@ fn mob_movement_and_separation(
 
         tf.scale = Vec3::ONE;
 
-        // Расталкивание
         let mut push_x = 0.0_f32;
         let mut push_z = 0.0_f32;
         let my_pos = tf.translation;
@@ -531,7 +485,6 @@ fn mob_movement_and_separation(
         tf.translation.x += push_x;
         tf.translation.z += push_z;
 
-        // Разворот если застряли
         if allow_move && mob.on_ground {
             let dx = tf.translation.x - pos_before.x;
             let dz = tf.translation.z - pos_before.z;
@@ -546,7 +499,6 @@ fn mob_movement_and_separation(
             }
         }
 
-        // === АНИМАЦИЯ НОГ ===
         let walking_state = matches!(mob.state, MobState::Wander | MobState::Flee)
             || (mob.state == MobState::Alert && mob.alert_walking);
         let want_walk = walking_state && mob.on_ground;
@@ -563,9 +515,6 @@ fn mob_movement_and_separation(
     }
 }
 
-// ============================================================
-// UNSTUCK
-// ============================================================
 fn unstuck_mobs(
     time: Res<Time>,
     world: Res<WorldData>,
@@ -610,9 +559,6 @@ fn unstuck_mobs(
     }
 }
 
-// ============================================================
-// АНИМАЦИЯ НОГ
-// ============================================================
 fn mob_leg_animation_system(
     mob_q: Query<&Mob>,
     mut pivot_q: Query<&mut Transform>,
@@ -629,16 +575,13 @@ fn mob_leg_animation_system(
     }
 }
 
-// ============================================================
-// УДАЛЕНИЕ МЁРТВЫХ
-// ============================================================
 fn despawn_dead_mobs(
     mut commands: Commands,
     q: Query<(Entity, &Mob)>,
 ) {
     for (entity, mob) in q.iter() {
         if mob.hp <= 0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }

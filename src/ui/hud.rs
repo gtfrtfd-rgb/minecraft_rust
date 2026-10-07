@@ -28,7 +28,6 @@ impl Plugin for HudPlugin {
 }
 
 fn setup_hud(mut commands: Commands) {
-    // ---- Прицел ----
     commands
         .spawn((
             Node {
@@ -41,7 +40,6 @@ fn setup_hud(mut commands: Commands) {
             Name::new("HudRoot"),
         ))
         .with_children(|parent| {
-            // Вертикальная полоса креста
             parent.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -59,7 +57,6 @@ fn setup_hud(mut commands: Commands) {
                 },
                 BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
             ));
-            // Горизонтальная полоса креста
             parent.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -79,7 +76,6 @@ fn setup_hud(mut commands: Commands) {
             ));
         });
 
-    // ---- Левый верхний угол ----
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -120,7 +116,6 @@ fn setup_hud(mut commands: Commands) {
         ));
     });
 
-    // ---- Правый верхний угол (подсказки) ----
     commands.spawn((
         Text::new(
             "WASD / Arrows - move\n\
@@ -149,7 +144,7 @@ fn update_coords(
     player_q: Query<&Transform, With<Player>>,
     mut text_q: Query<&mut Text, With<CoordsText>>,
 ) {
-    let Ok(tf) = player_q.get_single() else { return; };
+    let Ok(tf) = player_q.single() else { return; };
     let pos = tf.translation;
 
     for mut text in text_q.iter_mut() {
@@ -173,7 +168,6 @@ fn update_fps(
     }
 }
 
-/// Показать HUD только в игре
 fn update_visibility(
     state: Res<State<AppState>>,
     mut q: Query<&mut Node, With<HudRoot>>,

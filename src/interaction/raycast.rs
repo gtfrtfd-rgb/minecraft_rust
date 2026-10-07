@@ -43,7 +43,7 @@ fn update_target(
     world: Res<WorldData>,
     mut target: ResMut<TargetBlock>,
 ) {
-    let Ok(cam_tf) = camera_q.get_single() else {
+    let Ok(cam_tf) = camera_q.single() else {
         target.hit = None;
         return;
     };
@@ -58,7 +58,7 @@ fn update_target_mob(
     block_target: Res<TargetBlock>,
     mut target_mob: ResMut<TargetMob>,
 ) {
-    let Ok(cam_tf) = camera_q.get_single() else {
+    let Ok(cam_tf) = camera_q.single() else {
         target_mob.entity = None;
         return;
     };
@@ -118,7 +118,7 @@ fn draw_target_highlight(
         return;
     }
 
-    let Ok(cam_tf) = cam_q.get_single() else { return; };
+    let Ok(cam_tf) = cam_q.single() else { return; };
 
     let bmin = hit.block.as_vec3();
     let bmax = bmin + Vec3::ONE;

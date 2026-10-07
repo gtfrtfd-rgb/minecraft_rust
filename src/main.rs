@@ -7,7 +7,7 @@ mod ui;
 mod save;
 
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, CursorOptions};
+use bevy::window::{CursorGrabMode, CursorOptions, Window, WindowPlugin};
 use core::state::GameStatePlugin;
 use world::WorldPlugin;
 use player::PlayerPlugin;
@@ -20,9 +20,8 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: format!("Minecraft Rust"),
+                title: "Minecraft Rust".to_string(),
                 resolution: (1280.0_f32, 720.0_f32).into(),
-                // При старте — Menu. Курсор видим, не захвачен.
                 cursor_options: CursorOptions {
                     visible: true,
                     grab_mode: CursorGrabMode::None,

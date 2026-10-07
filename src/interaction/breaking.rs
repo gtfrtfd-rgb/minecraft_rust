@@ -73,7 +73,7 @@ fn handle_place(
     if !WorldData::in_bounds(pos.x, pos.y, pos.z) { return; }
     if world.get(pos.x, pos.y, pos.z).is_solid() { return; }
 
-    if let Ok(player_tf) = player_q.get_single() {
+    if let Ok(player_tf) = player_q.single() {
         if block_intersects_player(pos, player_tf.translation) { return; }
     }
 

@@ -9,9 +9,6 @@ use crate::world::chunk::{WorldData, BlockType};
 use crate::player::controller::Player;
 use crate::core::state::{WorldSeed, PlayerLook};
 
-// ============================================================
-// СХЕМА СОХРАНЕНИЯ
-// ============================================================
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlayerMeta {
     pub x: f32,
@@ -37,9 +34,6 @@ pub struct LoadedSave {
     pub rle_bytes: Option<Vec<u8>>,
 }
 
-// ============================================================
-// ПУТИ
-// ============================================================
 fn saves_dir() -> PathBuf {
     let mut p = std::env::current_exe()
         .ok()
@@ -52,9 +46,6 @@ fn saves_dir() -> PathBuf {
 fn meta_path() -> PathBuf { saves_dir().join("meta.json") }
 fn world_path() -> PathBuf { saves_dir().join("world.bin") }
 
-// ============================================================
-// RLE
-// ============================================================
 fn rle_encode(blocks: &[BlockType]) -> Vec<u8> {
     let mut out = Vec::with_capacity(blocks.len() / 8);
     let mut i = 0;
@@ -95,9 +86,6 @@ pub fn rle_decode(data: &[u8], total_len: usize) -> Vec<BlockType> {
     out
 }
 
-// ============================================================
-// ПЛАГИН
-// ============================================================
 pub struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
@@ -177,7 +165,7 @@ fn save_game(
     look: &PlayerLook,
     player_q: &Query<(&Transform, &Player)>,
 ) {
-    let Ok((tf, player)) = player_q.get_single() else {
+    let Ok((tf, player)) = player_q.single() else {
         warn!("save_game: player not found");
         return;
     };

@@ -163,14 +163,12 @@ impl WorldData {
         }
     }
 
-    /// Невидимый барьер: за границами X/Z возвращает true.
-    /// Физически не пускает игрока, визуально ничего не видно.
     #[inline]
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
         if y < 0 { return true; }
         if y >= SY { return false; }
-        if x < 0 || x >= SX { return true; }  // невидимая стена по X
-        if z < 0 || z >= SZ { return true; }  // невидимая стена по Z
+        if x < 0 || x >= SX { return true; }
+        if z < 0 || z >= SZ { return true; }
         self.get(x, y, z).is_solid()
     }
 }
@@ -425,6 +423,7 @@ impl Plugin for ChunkPlugin {
         app.insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 1200.0,
+            affects_lightmapped_meshes: true,
         })
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()

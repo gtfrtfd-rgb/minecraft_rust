@@ -23,9 +23,6 @@ const INITIAL_MOB_COUNT: usize = 40;
 const MIN_DIST_FROM_PLAYER: f32 = 16.0;
 const SKY_CLEARANCE: i32 = 5;
 
-// ============================================================
-// АТЛАС ТЕКСТУР (4x4 тайла по 16x16 пикселей)
-// ============================================================
 const TILE: u32 = 16;
 const ATLAS_COLS: u32 = 4;
 const ATLAS_ROWS: u32 = 4;
@@ -39,9 +36,6 @@ const TILE_DETAIL: u32 = 3;
 const TILE_EYE:    u32 = 4;
 const TILE_EXTRA:  u32 = 5;
 
-// ============================================================
-// ГЕОМЕТРИЯ КУБА (6 граней × 4 вершины)
-// ============================================================
 const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([ 1.0, 0.0, 0.0], [[ 1.0,-1.0, 1.0],[ 1.0,-1.0,-1.0],[ 1.0, 1.0,-1.0],[ 1.0, 1.0, 1.0]]),
     ([-1.0, 0.0, 0.0], [[-1.0,-1.0,-1.0],[-1.0,-1.0, 1.0],[-1.0, 1.0, 1.0],[-1.0, 1.0,-1.0]]),
@@ -51,12 +45,10 @@ const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([0.0, 0.0, -1.0], [[ 1.0,-1.0,-1.0],[-1.0,-1.0,-1.0],[-1.0, 1.0,-1.0],[ 1.0, 1.0,-1.0]]),
 ];
 
-/// UV-координаты четырёх углов тайла `tile` в атласе.
-/// Порядок углов соответствует CUBE_FACES (0..3).
 fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
     let cols = ATLAS_COLS as f32;
     let rows = ATLAS_ROWS as f32;
-    let inset = 0.5 / ATLAS_W as f32; // половина пикселя — чтобы не зацепить соседний тайл
+    let inset = 0.5 / ATLAS_W as f32;
     let tc = (tile % ATLAS_COLS) as f32;
     let tr = (tile / ATLAS_COLS) as f32;
     [
@@ -67,9 +59,6 @@ fn tile_uv(tile: u32) -> [[f32; 2]; 4] {
     ]
 }
 
-// ============================================================
-// ПОСТРОИТЕЛЬ МЕША
-// ============================================================
 struct MeshBuilder {
     positions: Vec<[f32; 3]>,
     normals:   Vec<[f32; 3]>,
@@ -122,9 +111,6 @@ impl MeshBuilder {
     }
 }
 
-// ============================================================
-// ЦВЕТА МОБОВ
-// ============================================================
 struct MobColors {
     body: Color,
     head: Color,
@@ -171,9 +157,6 @@ fn colors_for(mt: MobType) -> MobColors {
     }
 }
 
-// ============================================================
-// ГЕНЕРАЦИЯ ПИКСЕЛЬНЫХ ТЕКСТУР (стиль Minecraft)
-// ============================================================
 #[inline]
 fn hash(x: u32, y: u32, seed: u32) -> f32 {
     let mut h = x.wrapping_mul(374761393).wrapping_add(y.wrapping_mul(668265263));
@@ -194,7 +177,6 @@ fn rgb(c: Color) -> [u8; 3] {
     ]
 }
 
-/// Пиксель в MC-стиле: базовый цвет + редкие более тёмные/светлые пятна.
 fn shade_pixel(base: [u8; 3], x: u32, y: u32, seed: u32, intensity: i32) -> [u8; 4] {
     let n = hash(x, y, seed);
     let delta = if n < 0.12 {
@@ -251,7 +233,6 @@ fn make_atlas(mt: MobType) -> Image {
     draw_tile(&mut data, TILE_DETAIL, |x, y| shade_pixel(detail, x, y, 4,  8));
     draw_tile(&mut data, TILE_EXTRA,  |x, y| shade_pixel(extra,  x, y, 6, 10));
 
-    // Глаз — тёмный, с очень редкими чуть более светлыми пикселями (отблеск)
     draw_tile(&mut data, TILE_EYE, |x, y| {
         let n = hash(x, y, 5);
         let v = if n > 0.75 { 22 } else { 0 };
@@ -278,9 +259,6 @@ fn make_atlas(mt: MobType) -> Image {
     img
 }
 
-// ============================================================
-// МЕШ ТЕЛА + ГОЛОВЫ + ДЕТАЛЕЙ
-// ============================================================
 fn build_body_mesh(mt: MobType) -> Mesh {
     let mut b = MeshBuilder::new();
 
@@ -292,20 +270,16 @@ fn build_body_mesh(mt: MobType) -> Mesh {
     let head_offset_z = -(body_size.z * 0.5 + head_size.z * 0.5);
     let head_y = h * 0.85;
 
-    // Тело и голова
     b.add_cube(Vec3::new(0.0, body_y, 0.0), body_size, TILE_BODY);
     b.add_cube(Vec3::new(0.0, head_y, head_offset_z), head_size, TILE_HEAD);
 
-    // Детали
     match mt {
         MobType::Pig => {
-            // Пятачок
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.03),
                 Vec3::new(head_size.x * 0.55, head_size.y * 0.45, 0.06),
                 TILE_DETAIL,
             );
-            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -317,7 +291,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                     TILE_EYE,
                 );
             }
-            // Ушки
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -331,13 +304,11 @@ fn build_body_mesh(mt: MobType) -> Mesh {
             }
         }
         MobType::Sheep => {
-            // Морда
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.02),
                 Vec3::new(head_size.x * 0.7, head_size.y * 0.6, 0.05),
                 TILE_DETAIL,
             );
-            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -349,7 +320,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                     TILE_EYE,
                 );
             }
-            // Уши
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -363,19 +333,16 @@ fn build_body_mesh(mt: MobType) -> Mesh {
             }
         }
         MobType::Cow => {
-            // Белая морда
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.08, head_offset_z - head_size.z * 0.5 - 0.03),
                 Vec3::new(head_size.x * 0.75, head_size.y * 0.55, 0.07),
                 TILE_DETAIL,
             );
-            // Нос
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.06),
                 Vec3::new(0.15, 0.08, 0.03),
                 TILE_EXTRA,
             );
-            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -387,7 +354,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                     TILE_EYE,
                 );
             }
-            // Рога
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -399,7 +365,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                     TILE_DETAIL,
                 );
             }
-            // Уши
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -413,25 +378,21 @@ fn build_body_mesh(mt: MobType) -> Mesh {
             }
         }
         MobType::Chicken => {
-            // Клюв
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.02, head_offset_z - head_size.z * 0.5 - 0.04),
                 Vec3::new(0.10, 0.06, 0.08),
                 TILE_DETAIL,
             );
-            // Гребень
             b.add_cube(
                 Vec3::new(0.0, head_y + head_size.y * 0.5 + 0.05, head_offset_z),
                 Vec3::new(0.10, 0.10, 0.18),
                 TILE_EXTRA,
             );
-            // Бородка
             b.add_cube(
                 Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.02),
                 Vec3::new(0.06, 0.08, 0.05),
                 TILE_EXTRA,
             );
-            // Глаза
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -443,7 +404,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                     TILE_EYE,
                 );
             }
-            // Крылья
             for sx in [-1.0, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -461,9 +421,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
     b.build()
 }
 
-// ============================================================
-// МЕШ НОГИ
-// ============================================================
 fn build_leg_mesh(mt: MobType) -> Mesh {
     let mut b = MeshBuilder::new();
     let leg_size = mt.leg_size();
@@ -472,9 +429,6 @@ fn build_leg_mesh(mt: MobType) -> Mesh {
     b.build()
 }
 
-// ============================================================
-// СПАВН
-// ============================================================
 fn spawn_initial_mobs(
     mut commands: Commands,
     world: Res<WorldData>,
@@ -484,7 +438,7 @@ fn spawn_initial_mobs(
     mut images: ResMut<Assets<Image>>,
 ) {
     let player_pos = player_q
-        .get_single()
+        .single()
         .map(|t| t.translation)
         .unwrap_or(Vec3::new(SX as f32 * 0.5, 30.0, SZ as f32 * 0.5));
 
@@ -494,13 +448,11 @@ fn spawn_initial_mobs(
     );
     let t0 = std::time::Instant::now();
 
-    // Атласы и материалы для каждого типа
     let pig_mat     = materials.add(mob_material(images.add(make_atlas(MobType::Pig))));
     let sheep_mat   = materials.add(mob_material(images.add(make_atlas(MobType::Sheep))));
     let cow_mat     = materials.add(mob_material(images.add(make_atlas(MobType::Cow))));
     let chicken_mat = materials.add(mob_material(images.add(make_atlas(MobType::Chicken))));
 
-    // Меши (тело+голова и нога) для каждого типа
     let pig_body     = meshes.add(build_body_mesh(MobType::Pig));
     let sheep_body   = meshes.add(build_body_mesh(MobType::Sheep));
     let cow_body     = meshes.add(build_body_mesh(MobType::Cow));
@@ -530,7 +482,6 @@ fn spawn_initial_mobs(
             continue;
         }
 
-        // Верхний твёрдый блок
         let mut top_y: Option<i32> = None;
         for y in (1..SY - 1).rev() {
             if world.get(x, y, z).is_solid() {
@@ -541,7 +492,6 @@ fn spawn_initial_mobs(
         let Some(ground_y) = top_y else { continue };
         let spawn_y = ground_y + 1;
 
-        // Открытое небо
         let mut sky_clear = true;
         for dy in 0..SKY_CLEARANCE {
             let check_y = spawn_y + dy;
@@ -553,7 +503,6 @@ fn spawn_initial_mobs(
         }
         if !sky_clear { continue; }
 
-        // Свободное место
         let mut free = true;
         for dy in 0..3 {
             if world.get(x, spawn_y + dy, z).is_solid() {
@@ -606,9 +555,6 @@ fn mob_material(atlas: Handle<Image>) -> StandardMaterial {
     }
 }
 
-// ============================================================
-// СОЗДАНИЕ ОДНОГО МОБА
-// ============================================================
 fn spawn_mob(
     commands: &mut Commands,
     body_mesh: Handle<Mesh>,
@@ -625,7 +571,6 @@ fn spawn_mob(
     let leg_offset_z = body_size.z * 0.35;
     let leg_top_y = leg_size.y;
 
-    // 4 позиции для ног: FL, FR, BL, BR
     let leg_positions = [
         Vec3::new( leg_offset_x, leg_top_y, -leg_offset_z),
         Vec3::new(-leg_offset_x, leg_top_y, -leg_offset_z),

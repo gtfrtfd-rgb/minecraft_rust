@@ -30,7 +30,6 @@ impl Plugin for PlayerControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_player)
             .add_systems(Startup, apply_loaded_state.after(spawn_player))
-            // Движение и полёт — только когда играем
             .add_systems(
                 Update,
                 (player_movement, toggle_fly).run_if(in_state(AppState::InGame)),
@@ -60,7 +59,7 @@ fn apply_loaded_state(
 ) {
     let Some(meta) = &loaded.meta else { return; };
 
-    if let Ok((mut tf, mut player)) = player_q.get_single_mut() {
+    if let Ok((mut tf, mut player)) = player_q.single_mut() {
         tf.translation = Vec3::new(meta.player.x, meta.player.y, meta.player.z);
         player.fly = meta.player.fly;
     }
