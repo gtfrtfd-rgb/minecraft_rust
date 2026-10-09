@@ -34,13 +34,28 @@ pub struct LoadedSave {
     pub rle_bytes: Option<Vec<u8>>,
 }
 
+/// Возвращает путь к папке сохранений.
+///
+/// На Android `current_exe()` возвращает `/system/bin/...`, куда писать нельзя,
+/// поэтому используем приватную директорию приложения (обычно
+/// `/data/user/0/<package>/files`), путь к которой передаётся через `HOME`.
 fn saves_dir() -> PathBuf {
-    let mut p = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
-    p.push("saves");
-    p
+    if cfg!(target_os = "android") {
+        if let Ok(home) = std::env::var("HOME") {
+            let mut p = PathBuf::from(home);
+            p.push("saves");
+            return p;
+        }
+        // Запасной вариант, если HOME почему-то не установлена.
+        PathBuf::from("/data/data/com.example.minecraft_rust/files/saves")
+    } else {
+        let mut p = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| PathBuf::from("."));
+        p.push("saves");
+        p
+    }
 }
 
 fn meta_path() -> PathBuf { saves_dir().join("meta.json") }

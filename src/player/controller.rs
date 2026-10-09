@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use crate::core::state::{AppState, PlayerLook};
+use virtual_joystick::VirtualJoystickMessage;
+use crate::core::state::{is_mobile, AppState, PlayerLook};
 use crate::world::chunk::WorldData;
 use crate::save::persistence::LoadedSave;
 
@@ -24,6 +25,15 @@ pub struct Player {
     pub coyote_timer: f32,
 }
 
+#[derive(Component)]
+pub struct MoveJoystick;
+
+#[derive(Component)]
+pub struct JumpButton;
+
+#[derive(Component)]
+pub struct FlyButton;
+
 pub struct PlayerControllerPlugin;
 
 impl Plugin for PlayerControllerPlugin {
@@ -32,7 +42,8 @@ impl Plugin for PlayerControllerPlugin {
             .add_systems(Startup, apply_loaded_state.after(spawn_player))
             .add_systems(
                 Update,
-                (player_movement, toggle_fly).run_if(in_state(AppState::InGame)),
+                (player_movement, toggle_fly, handle_mobile_buttons)
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -84,6 +95,29 @@ fn toggle_fly(
     }
 }
 
+fn handle_mobile_buttons(
+    mut jump_q: Query<&Interaction, (Changed<Interaction>, With<JumpButton>)>,
+    mut fly_q: Query<&Interaction, (Changed<Interaction>, With<FlyButton>)>,
+    mut player_q: Query<&mut Player>,
+) {
+    for interaction in jump_q.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            for mut p in player_q.iter_mut() {
+                p.jump_buffer = JUMP_BUFFER;
+            }
+        }
+    }
+
+    for interaction in fly_q.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            for mut p in player_q.iter_mut() {
+                p.fly = !p.fly;
+                p.velocity.y = 0.0;
+            }
+        }
+    }
+}
+
 fn collides(world: &WorldData, px: f32, py: f32, pz: f32) -> bool {
     let x0 = (px - PLAYER_RADIUS).floor() as i32;
     let x1 = (px + PLAYER_RADIUS).floor() as i32;
@@ -110,6 +144,7 @@ fn player_movement(
     look: Res<PlayerLook>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    mut joystick_reader: MessageReader<VirtualJoystickMessage<()>>,
 ) {
     let dt = time.delta_secs().min(0.05);
 
@@ -119,24 +154,40 @@ fn player_movement(
 
     let space_held = keys.pressed(KeyCode::Space);
 
+    // Считываем значение джойстика (только на мобильных).
+    // msg.axis() возвращает &Vec2, поэтому разыменовываем.
+    let mut joystick_dir = Vec2::ZERO;
+    if is_mobile() {
+        for msg in joystick_reader.read() {
+            joystick_dir = *msg.axis();
+        }
+    }
+
     for (mut transform, mut player) in player_q.iter_mut() {
         let mut dir = Vec3::ZERO;
 
-        if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
-            dir += forward;
-        }
-        if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
-            dir -= forward;
-        }
-        if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
-            dir += right;
-        }
-        if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
-            dir -= right;
-        }
+        if is_mobile() {
+            if joystick_dir.length_squared() > 0.01 {
+                dir = forward * (-joystick_dir.y) + right * joystick_dir.x;
+                dir = dir.normalize_or_zero();
+            }
+        } else {
+            if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
+                dir += forward;
+            }
+            if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
+                dir -= forward;
+            }
+            if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+                dir += right;
+            }
+            if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+                dir -= right;
+            }
 
-        if dir.length_squared() > 0.0 {
-            dir = dir.normalize();
+            if dir.length_squared() > 0.0 {
+                dir = dir.normalize();
+            }
         }
 
         let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
