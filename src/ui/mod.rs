@@ -1,7 +1,6 @@
 pub mod hotbar;
 pub mod hud;
 pub mod menu;
-pub mod touch_controls;
 
 use bevy::prelude::*;
 
@@ -13,7 +12,6 @@ impl Plugin for UiPlugin {
             hotbar::HotbarPlugin,
             hud::HudPlugin,
             menu::MenuPlugin,
-            touch_controls::TouchControlsPlugin,
         ));
         info!("UiPlugin loaded.");
     }

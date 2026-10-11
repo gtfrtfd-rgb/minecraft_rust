@@ -8,20 +8,15 @@ pub const SZ: i32 = 256;
 
 pub const CHUNK_SIZE: i32 = 16;
 
-/// Определяет, запущено ли приложение на мобильной платформе.
-pub fn is_mobile() -> bool {
-    cfg!(target_os = "android") || cfg!(target_os = "ios")
-}
-
 // ============================================================
 // СОСТОЯНИЯ ИГРЫ
 // ============================================================
 #[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum AppState {
     #[default]
-    Menu,
-    InGame,
-    Paused,
+    Menu,      // Главное меню — курсор видим, игра на паузе
+    InGame,    // Активная игра — курсор захвачен
+    Paused,    // Пауза — курсор видим, игра заморожена
 }
 
 #[derive(Resource)]
@@ -64,7 +59,7 @@ impl Plugin for GameStatePlugin {
 
 fn handle_slot_input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: MessageReader<MouseWheel>,
+    mut wheel: MessageReader<MouseWheel>, // Уже изменено на MessageReader
     mut selected: ResMut<SelectedSlot>,
 ) {
     use KeyCode::*;
