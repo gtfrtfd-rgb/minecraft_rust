@@ -131,20 +131,20 @@ fn colors_for(mt: MobType) -> MobColors {
             eye:    Color::srgb(0.05, 0.03, 0.05),
         },
         MobType::Sheep => MobColors {
-            body:   Color::srgb(0.95, 0.95, 0.92),
-            head:   Color::srgb(0.85, 0.80, 0.72),
-            leg:    Color::srgb(0.30, 0.28, 0.26),
-            detail: Color::srgb(0.20, 0.18, 0.16),
-            extra:  Color::srgb(0.75, 0.70, 0.62),
+            body:   Color::srgb(0.94, 0.94, 0.91),
+            head:   Color::srgb(0.62, 0.45, 0.33),
+            leg:    Color::srgb(0.55, 0.40, 0.29),
+            detail: Color::srgb(0.42, 0.30, 0.22),
+            extra:  Color::srgb(0.80, 0.74, 0.66),
             eye:    Color::srgb(0.05, 0.03, 0.05),
         },
         MobType::Cow => MobColors {
-            body:   Color::srgb(0.42, 0.28, 0.14),
-            head:   Color::srgb(0.42, 0.28, 0.14),
-            leg:    Color::srgb(0.35, 0.22, 0.10),
-            detail: Color::srgb(0.92, 0.88, 0.82),
-            extra:  Color::srgb(0.20, 0.14, 0.08),
-            eye:    Color::srgb(0.05, 0.03, 0.05),
+            body:   Color::srgb(0.24, 0.15, 0.08),
+            head:   Color::srgb(0.20, 0.12, 0.06),
+            leg:    Color::srgb(0.22, 0.14, 0.07),
+            detail: Color::srgb(0.92, 0.88, 0.80),
+            extra:  Color::srgb(0.10, 0.06, 0.03),
+            eye:    Color::srgb(0.04, 0.02, 0.03),
         },
         MobType::Chicken => MobColors {
             body:   Color::srgb(0.98, 0.98, 0.98),
@@ -259,156 +259,324 @@ fn make_atlas(mt: MobType) -> Image {
     img
 }
 
+// ============================================================
+// ГЕОМЕТРИЯ МОБОВ (в стиле Minecraft)
+// ============================================================
+
 fn build_body_mesh(mt: MobType) -> Mesh {
     let mut b = MeshBuilder::new();
 
-    let h = mt.height();
     let body_size = mt.body_size();
     let head_size = mt.head_size();
+    let leg_size  = mt.leg_size();
 
-    let body_y = h * 0.5;
-    let head_offset_z = -(body_size.z * 0.5 + head_size.z * 0.5);
-    let head_y = h * 0.85;
+    // Туловище
+    let body_bottom = leg_size.y;
+    let body_top    = body_bottom + body_size.y;
+    let body_center_y = (body_bottom + body_top) * 0.5;
 
-    b.add_cube(Vec3::new(0.0, body_y, 0.0), body_size, TILE_BODY);
-    b.add_cube(Vec3::new(0.0, head_y, head_offset_z), head_size, TILE_HEAD);
+    // Голова — вперёд, верх головы совпадает с верхом туловища
+    let head_center_y = body_top - head_size.y * 0.5;
+    let head_center_z = -(body_size.z * 0.5 + head_size.z * 0.5);
+    let head_front_z  = head_center_z - head_size.z * 0.5;
+
+    b.add_cube(Vec3::new(0.0, body_center_y, 0.0), body_size, TILE_BODY);
+
+    // У овцы «голова» — шерсть (TILE_BODY), коричневая только морда спереди.
+    let head_tile = if matches!(mt, MobType::Sheep) {
+        TILE_BODY
+    } else {
+        TILE_HEAD
+    };
+    b.add_cube(
+        Vec3::new(0.0, head_center_y, head_center_z),
+        head_size,
+        head_tile,
+    );
 
     match mt {
+        // --------------------------------------------------
+        // СВИНЬЯ
+        // --------------------------------------------------
         MobType::Pig => {
+            let snout_size = Vec3::new(head_size.x * 0.55, head_size.y * 0.42, 0.06);
+            let snout_y = head_center_y - head_size.y * 0.15;
+            let snout_z = head_front_z - snout_size.z * 0.5;
+
             b.add_cube(
-                Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.03),
-                Vec3::new(head_size.x * 0.55, head_size.y * 0.45, 0.06),
-                TILE_DETAIL,
+                Vec3::new(0.0, snout_y, snout_z),
+                snout_size,
+                TILE_BODY,
             );
-            for sx in [-1.0, 1.0] {
+
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
-                        sx * head_size.x * 0.28,
-                        head_y + head_size.y * 0.15,
-                        head_offset_z - head_size.z * 0.5 - 0.005,
+                        sx * snout_size.x * 0.28,
+                        snout_y,
+                        head_front_z - snout_size.z - 0.004,
                     ),
-                    Vec3::new(0.08, 0.08, 0.02),
+                    Vec3::new(snout_size.x * 0.18, snout_size.y * 0.35, 0.008),
                     TILE_EYE,
                 );
             }
-            for sx in [-1.0, 1.0] {
-                b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.35,
-                        head_y + head_size.y * 0.5 + 0.05,
-                        head_offset_z,
-                    ),
-                    Vec3::new(0.12, 0.15, 0.08),
-                    TILE_HEAD,
-                );
-            }
-        }
-        MobType::Sheep => {
-            b.add_cube(
-                Vec3::new(0.0, head_y - 0.05, head_offset_z - head_size.z * 0.5 - 0.02),
-                Vec3::new(head_size.x * 0.7, head_size.y * 0.6, 0.05),
-                TILE_DETAIL,
-            );
-            for sx in [-1.0, 1.0] {
-                b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.25,
-                        head_y + head_size.y * 0.15,
-                        head_offset_z - head_size.z * 0.5 - 0.005,
-                    ),
-                    Vec3::new(0.07, 0.07, 0.02),
-                    TILE_EYE,
-                );
-            }
-            for sx in [-1.0, 1.0] {
-                b.add_cube(
-                    Vec3::new(
-                        sx * (head_size.x * 0.5 + 0.04),
-                        head_y + 0.05,
-                        head_offset_z,
-                    ),
-                    Vec3::new(0.10, 0.05, 0.15),
-                    TILE_HEAD,
-                );
-            }
-        }
-        MobType::Cow => {
-            b.add_cube(
-                Vec3::new(0.0, head_y - 0.08, head_offset_z - head_size.z * 0.5 - 0.03),
-                Vec3::new(head_size.x * 0.75, head_size.y * 0.55, 0.07),
-                TILE_DETAIL,
-            );
-            b.add_cube(
-                Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.06),
-                Vec3::new(0.15, 0.08, 0.03),
-                TILE_EXTRA,
-            );
-            for sx in [-1.0, 1.0] {
+
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
                         sx * head_size.x * 0.30,
-                        head_y + head_size.y * 0.10,
-                        head_offset_z - head_size.z * 0.5 - 0.005,
+                        head_center_y + head_size.y * 0.05,
+                        head_front_z - 0.004,
                     ),
-                    Vec3::new(0.08, 0.08, 0.02),
+                    Vec3::new(0.09, 0.09, 0.008),
                     TILE_EYE,
                 );
             }
-            for sx in [-1.0, 1.0] {
+
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.36,
+                        head_center_y + head_size.y * 0.5 + 0.035,
+                        head_center_z + head_size.z * 0.15,
+                    ),
+                    Vec3::new(0.11, 0.10, 0.06),
+                    TILE_BODY,
+                );
+            }
+        }
+
+        // --------------------------------------------------
+        // ОВЦА
+        // --------------------------------------------------
+        MobType::Sheep => {
+            let muzzle = Vec3::new(head_size.x * 0.85, head_size.y * 0.60, 0.04);
+            let muzzle_y = head_center_y - head_size.y * 0.08;
+            let muzzle_z = head_front_z - muzzle.z * 0.5;
+
+            b.add_cube(
+                Vec3::new(0.0, muzzle_y, muzzle_z),
+                muzzle,
+                TILE_HEAD,
+            );
+
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * muzzle.x * 0.20,
+                        muzzle_y - muzzle.y * 0.15,
+                        head_front_z - muzzle.z - 0.003,
+                    ),
+                    Vec3::new(0.035, 0.035, 0.008),
+                    TILE_EYE,
+                );
+            }
+
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
                         sx * head_size.x * 0.32,
-                        head_y + head_size.y * 0.5 + 0.06,
-                        head_offset_z,
+                        head_center_y + head_size.y * 0.10,
+                        head_front_z - muzzle.z - 0.006,
                     ),
-                    Vec3::new(0.10, 0.15, 0.10),
-                    TILE_DETAIL,
+                    Vec3::new(0.10, 0.10, 0.010),
+                    TILE_EYE,
                 );
             }
-            for sx in [-1.0, 1.0] {
+
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
-                        sx * (head_size.x * 0.5 + 0.05),
-                        head_y + head_size.y * 0.15,
-                        head_offset_z,
+                        sx * (head_size.x * 0.5 + 0.035),
+                        head_center_y + head_size.y * 0.30,
+                        head_center_z + head_size.z * 0.10,
                     ),
-                    Vec3::new(0.10, 0.15, 0.08),
+                    Vec3::new(0.06, 0.10, 0.10),
                     TILE_HEAD,
                 );
             }
         }
-        MobType::Chicken => {
+
+        // --------------------------------------------------
+        // КОРОВА
+        // --------------------------------------------------
+        MobType::Cow => {
+            // Белая муфта
+            let muzzle = Vec3::new(head_size.x * 0.7, head_size.y * 0.42, 0.05);
+            let muzzle_y = head_center_y - head_size.y * 0.15;
+
             b.add_cube(
-                Vec3::new(0.0, head_y - 0.02, head_offset_z - head_size.z * 0.5 - 0.04),
-                Vec3::new(0.10, 0.06, 0.08),
+                Vec3::new(0.0, muzzle_y, head_front_z - muzzle.z * 0.5),
+                muzzle,
                 TILE_DETAIL,
             );
-            b.add_cube(
-                Vec3::new(0.0, head_y + head_size.y * 0.5 + 0.05, head_offset_z),
-                Vec3::new(0.10, 0.10, 0.18),
-                TILE_EXTRA,
-            );
-            b.add_cube(
-                Vec3::new(0.0, head_y - 0.12, head_offset_z - head_size.z * 0.5 - 0.02),
-                Vec3::new(0.06, 0.08, 0.05),
-                TILE_EXTRA,
-            );
-            for sx in [-1.0, 1.0] {
+
+            // Ноздри — на передней плоскости муфты
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
-                        sx * head_size.x * 0.35,
-                        head_y + head_size.y * 0.20,
-                        head_offset_z - head_size.z * 0.5 - 0.003,
+                        sx * muzzle.x * 0.22,
+                        muzzle_y,
+                        head_front_z - muzzle.z - 0.003,
                     ),
-                    Vec3::new(0.05, 0.05, 0.02),
+                    Vec3::new(0.05, 0.05, 0.008),
                     TILE_EYE,
                 );
             }
-            for sx in [-1.0, 1.0] {
+
+            // Белый «блик» (blaze) на лбу — вертикальная полоска
+            b.add_cube(
+                Vec3::new(
+                    0.0,
+                    head_center_y + head_size.y * 0.18,
+                    head_front_z - 0.005,
+                ),
+                Vec3::new(head_size.x * 0.22, head_size.y * 0.42, 0.008),
+                TILE_DETAIL,
+            );
+
+            // Глаза — по бокам от блика, ВЫШЕ верхней кромки муфты.
+            // Муфта сверху доходит до head_center_y + 0.06*h,
+            // поэтому ставим глаза на +0.22*h — гарантированно выше неё.
+            // По Z держим чуть впереди лба, но не залезаем на муфту.
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.30,
+                        head_center_y + head_size.y * 0.22,
+                        head_front_z - 0.008,
+                    ),
+                    Vec3::new(0.10, 0.10, 0.012),
+                    TILE_EYE,
+                );
+            }
+
+            // Рожки
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.34,
+                        head_center_y + head_size.y * 0.5 + 0.045,
+                        head_center_z + 0.02,
+                    ),
+                    Vec3::new(0.08, 0.11, 0.08),
+                    TILE_DETAIL,
+                );
+            }
+
+            // Ушки
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * (head_size.x * 0.5 + 0.04),
+                        head_center_y + head_size.y * 0.02,
+                        head_center_z + 0.05,
+                    ),
+                    Vec3::new(0.10, 0.14, 0.06),
+                    TILE_HEAD,
+                );
+            }
+
+            // --------------------------------------------------
+            // БЕЛЫЕ ПЯТНА НА КОРПУСЕ
+            // --------------------------------------------------
+            let eps      = 0.008;
+            let spot_th  = 0.016;
+            let body_hx  = body_size.x * 0.5;
+            let body_hy  = body_size.y * 0.5;
+            let body_hz  = body_size.z * 0.5;
+
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * (body_hx + eps),
+                        body_center_y + body_hy * 0.25,
+                        body_hz * 0.15,
+                    ),
+                    Vec3::new(spot_th, body_size.y * 0.55, body_size.z * 0.38),
+                    TILE_DETAIL,
+                );
+                b.add_cube(
+                    Vec3::new(
+                        sx * (body_hx + eps),
+                        body_center_y - body_hy * 0.30,
+                        -body_hz * 0.30,
+                    ),
+                    Vec3::new(spot_th, body_size.y * 0.28, body_size.z * 0.22),
+                    TILE_DETAIL,
+                );
+            }
+
+            b.add_cube(
+                Vec3::new(
+                    -body_hx * 0.25,
+                    body_center_y + body_hy + eps,
+                    -body_hz * 0.20,
+                ),
+                Vec3::new(body_size.x * 0.42, spot_th, body_size.z * 0.34),
+                TILE_DETAIL,
+            );
+
+            b.add_cube(
+                Vec3::new(
+                    body_hx * 0.22,
+                    body_center_y + body_hy * 0.05,
+                    body_hz + eps,
+                ),
+                Vec3::new(body_size.x * 0.42, body_size.y * 0.45, spot_th),
+                TILE_DETAIL,
+            );
+
+            b.add_cube(
+                Vec3::new(
+                    -body_hx * 0.30,
+                    body_center_y - body_hy * 0.20,
+                    -body_hz - eps,
+                ),
+                Vec3::new(body_size.x * 0.30, body_size.y * 0.30, spot_th),
+                TILE_DETAIL,
+            );
+        }
+
+        // --------------------------------------------------
+        // КУРИЦА
+        // --------------------------------------------------
+        MobType::Chicken => {
+            b.add_cube(
+                Vec3::new(0.0, head_center_y - head_size.y * 0.05, head_front_z - 0.04),
+                Vec3::new(0.10, 0.06, 0.08),
+                TILE_DETAIL,
+            );
+
+            b.add_cube(
+                Vec3::new(0.0, head_center_y + head_size.y * 0.5 + 0.05, head_center_z),
+                Vec3::new(0.10, 0.10, 0.18),
+                TILE_EXTRA,
+            );
+
+            b.add_cube(
+                Vec3::new(0.0, head_center_y - head_size.y * 0.5 - 0.03, head_front_z - 0.02),
+                Vec3::new(0.06, 0.08, 0.05),
+                TILE_EXTRA,
+            );
+
+            for sx in [-1.0_f32, 1.0] {
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.35,
+                        head_center_y + head_size.y * 0.15,
+                        head_front_z - 0.003,
+                    ),
+                    Vec3::new(0.05, 0.05, 0.01),
+                    TILE_EYE,
+                );
+            }
+
+            for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
                         sx * (body_size.x * 0.5 + 0.025),
-                        body_y,
+                        body_center_y,
                         0.0,
                     ),
                     Vec3::new(0.05, body_size.y * 0.6, body_size.z * 0.7),
@@ -565,10 +733,11 @@ fn spawn_mob(
     yaw: f32,
 ) {
     let body_size = mob_type.body_size();
-    let leg_size = mob_type.leg_size();
+    let leg_size  = mob_type.leg_size();
 
-    let leg_offset_x = body_size.x * 0.35;
-    let leg_offset_z = body_size.z * 0.35;
+    // Лапы — строго по углам туловища, как в MC
+    let leg_offset_x = (body_size.x - leg_size.x) * 0.5;
+    let leg_offset_z = (body_size.z - leg_size.z) * 0.5;
     let leg_top_y = leg_size.y;
 
     let leg_positions = [

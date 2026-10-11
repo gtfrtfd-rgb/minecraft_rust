@@ -17,7 +17,7 @@ impl MobType {
     pub fn height(self) -> f32 {
         match self {
             MobType::Pig => 0.9,
-            MobType::Sheep => 1.25,
+            MobType::Sheep => 1.15,
             MobType::Cow => 1.45,
             MobType::Chicken => 0.7,
         }
@@ -62,7 +62,8 @@ impl MobType {
     pub fn body_size(self) -> Vec3 {
         match self {
             MobType::Pig => Vec3::new(0.6, 0.5, 1.0),
-            MobType::Sheep => Vec3::new(0.75, 0.75, 1.0),
+            // Овца — приземистая и вытянутая, шире чем выше
+            MobType::Sheep => Vec3::new(0.8, 0.55, 1.1),
             MobType::Cow => Vec3::new(0.75, 0.625, 1.125),
             MobType::Chicken => Vec3::new(0.3, 0.4, 0.4),
         }
@@ -71,7 +72,8 @@ impl MobType {
     pub fn head_size(self) -> Vec3 {
         match self {
             MobType::Pig => Vec3::new(0.5, 0.5, 0.5),
-            MobType::Sheep => Vec3::new(0.4, 0.5, 0.4),
+            // Голова овцы — крупная, чтобы читалась издалека
+            MobType::Sheep => Vec3::new(0.5, 0.5, 0.5),
             MobType::Cow => Vec3::new(0.5, 0.5, 0.5),
             MobType::Chicken => Vec3::new(0.2, 0.3, 0.2),
         }
