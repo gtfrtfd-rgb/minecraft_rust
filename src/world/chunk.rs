@@ -4,9 +4,9 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::Face;
-use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::GlobalAmbientLight;
-use crate::core::state::{SX, SY, SZ, CHUNK_SIZE};
+use crate::core::state::{SX, SY, SZ, CHUNK_SIZE, Settings};
+use crate::player::controller::Player;
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -429,6 +429,7 @@ impl Plugin for ChunkPlugin {
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()
         .add_systems(PostStartup, spawn_all_chunks)
+        .add_systems(Update, update_chunk_visibility)
         .add_systems(PostUpdate, rebuild_dirty_chunks);
         info!("ChunkPlugin loaded.");
     }
@@ -486,7 +487,6 @@ fn spawn_all_chunks(
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
                 ChunkMesh { coord: IVec2::new(cx, cz) },
-                NoFrustumCulling,
                 Name::new(format!("Chunk({}, {})", cx, cz)),
             ));
         }
@@ -502,7 +502,7 @@ fn spawn_all_chunks(
     commands.spawn((
         DirectionalLight {
             illuminance: 8000.0,
-            shadow_maps_enabled: false, // Изменено
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
@@ -511,11 +511,44 @@ fn spawn_all_chunks(
     commands.spawn((
         DirectionalLight {
             illuminance: 4000.0,
-            shadow_maps_enabled: false, // Изменено
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, 0.8, 2.5, 0.0)),
     ));
+}
+
+/// Скрывает чанки, центр которых дальше render_distance от игрока.
+/// Вместе со встроенным фрустум-отсечением Bevy это даёт
+/// ощутимый прирост FPS на больших мирах.
+fn update_chunk_visibility(
+    settings: Res<Settings>,
+    player_q: Query<&Transform, With<Player>>,
+    mut chunk_q: Query<(&ChunkMesh, &mut Visibility)>,
+) {
+    let Ok(pt) = player_q.single() else { return; };
+    let px = pt.translation.x;
+    let pz = pt.translation.z;
+    let rd = settings.render_distance;
+    let rd_sq = rd * rd;
+
+    for (chunk, mut vis) in chunk_q.iter_mut() {
+        let cx = (chunk.coord.x * CHUNK_SIZE) as f32 + CHUNK_SIZE as f32 * 0.5;
+        let cz = (chunk.coord.y * CHUNK_SIZE) as f32 + CHUNK_SIZE as f32 * 0.5;
+        let dx = cx - px;
+        let dz = cz - pz;
+        let d_sq = dx * dx + dz * dz;
+
+        let new_vis = if d_sq <= rd_sq {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+
+        if *vis != new_vis {
+            *vis = new_vis;
+        }
+    }
 }
 
 fn rebuild_dirty_chunks(

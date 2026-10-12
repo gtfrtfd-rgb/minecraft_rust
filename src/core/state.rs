@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
+use serde::{Serialize, Deserialize};
 use crate::world::chunk::BlockType;
 
 pub const SX: i32 = 256;
@@ -14,9 +15,32 @@ pub const CHUNK_SIZE: i32 = 16;
 #[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum AppState {
     #[default]
-    Menu,      // Главное меню — курсор видим, игра на паузе
-    InGame,    // Активная игра — курсор захвачен
-    Paused,    // Пауза — курсор видим, игра заморожена
+    Menu,
+    Settings,
+    InGame,
+    Paused,
+}
+
+// ============================================================
+// НАСТРОЙКИ
+// ============================================================
+#[derive(Resource, Serialize, Deserialize, Clone)]
+pub struct Settings {
+    pub master_volume: f32,
+    pub mouse_sensitivity: f32,
+    /// Дальность прорисовки в блоках. Чанки, центр которых
+    /// дальше этого расстояния от игрока, не рисуются.
+    pub render_distance: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            master_volume: 0.8,
+            mouse_sensitivity: 0.0022,
+            render_distance: 160.0,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -50,6 +74,7 @@ impl Plugin for GameStatePlugin {
         app.init_state::<AppState>()
             .init_resource::<PlayerLook>()
             .init_resource::<SelectedSlot>()
+            .init_resource::<Settings>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
             .add_systems(Update, handle_slot_input.run_if(in_state(AppState::InGame)));
@@ -59,7 +84,7 @@ impl Plugin for GameStatePlugin {
 
 fn handle_slot_input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: MessageReader<MouseWheel>, // Уже изменено на MessageReader
+    mut wheel: MessageReader<MouseWheel>,
     mut selected: ResMut<SelectedSlot>,
 ) {
     use KeyCode::*;

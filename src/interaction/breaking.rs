@@ -1,24 +1,20 @@
 use bevy::prelude::*;
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
-use crate::core::state::{AppState, HOTBAR, SelectedSlot};
+use crate::core::state::{AppState, HOTBAR, SelectedSlot, Settings};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
 use crate::mobs::ai::{Mob, MobState};
 use crate::audio::SoundHandles;
 use super::raycast::{TargetBlock, TargetMob};
 
-/// Сколько секунд нужно удерживать ЛКМ, чтобы сломать блок.
 const BREAK_TIME: f32 = 0.35;
 
-/// Прогресс ломания текущего блока.
 #[derive(Resource, Default)]
 pub struct BreakProgress {
     pub target: Option<IVec3>,
     pub progress: f32,
 }
 
-/// Рандомизатор питча — как в MC: при каждом действии
-/// питч гуляет в диапазоне 0.8–1.0.
 #[derive(Resource)]
 pub struct SoundRng(pub u32);
 
@@ -30,7 +26,6 @@ impl Default for SoundRng {
 
 impl SoundRng {
     /// Возвращает случайный питч в диапазоне [0.8, 1.0].
-    /// Именно этот разброс даёт тот самый «живой» звук MC.
     pub fn pitch(&mut self) -> f32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let n = (self.0 >> 16) & 0x7FFF;
@@ -64,6 +59,7 @@ fn handle_attack_mob(
     target_mob: Res<TargetMob>,
     mut mob_q: Query<&mut Mob>,
     sounds: Option<Res<SoundHandles>>,
+    settings: Res<Settings>,
     mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
@@ -87,12 +83,11 @@ fn handle_attack_mob(
     }
 
     if let Some(s) = sounds.as_ref() {
-        // Небольшой разброс питча — удар звучит по-разному.
         let pitch = 0.9 + (rng.pitch() - 0.8) * 0.5;
         commands.spawn((
             AudioPlayer(s.hit_mob.clone()),
             PlaybackSettings::DESPAWN
-                .with_volume(Volume::Linear(0.6))
+                .with_volume(Volume::Linear(0.6 * settings.master_volume))
                 .with_speed(pitch),
         ));
     }
@@ -107,6 +102,7 @@ fn handle_break_block(
     mut world: ResMut<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     sounds: Option<Res<SoundHandles>>,
+    settings: Res<Settings>,
     mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
@@ -140,12 +136,11 @@ fn handle_break_block(
     dirty.mark(pos.x, pos.z);
 
     if let Some(s) = sounds.as_ref() {
-        // Звук по материалу + случайный питч 0.8–1.0, как в MC.
         let pitch = rng.pitch();
         commands.spawn((
             AudioPlayer(s.break_sound_for(block)),
             PlaybackSettings::DESPAWN
-                .with_volume(Volume::Linear(0.55))
+                .with_volume(Volume::Linear(0.55 * settings.master_volume))
                 .with_speed(pitch),
         ));
     }
@@ -159,6 +154,7 @@ fn handle_place(
     mut dirty: ResMut<DirtyChunks>,
     player_q: Query<&Transform, With<Player>>,
     sounds: Option<Res<SoundHandles>>,
+    settings: Res<Settings>,
     mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
@@ -179,12 +175,11 @@ fn handle_place(
     dirty.mark(pos.x, pos.z);
 
     if let Some(s) = sounds.as_ref() {
-        // Установка тоже с разбросом питча — как в MC.
         let pitch = rng.pitch();
         commands.spawn((
             AudioPlayer(s.place_block.clone()),
             PlaybackSettings::DESPAWN
-                .with_volume(Volume::Linear(0.55))
+                .with_volume(Volume::Linear(0.55 * settings.master_volume))
                 .with_speed(pitch),
         ));
     }

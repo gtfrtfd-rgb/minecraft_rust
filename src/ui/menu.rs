@@ -9,9 +9,11 @@ struct MainMenuRoot;
 #[derive(Component)]
 struct PauseMenuRoot;
 
+/// Публичный для использования из settings.rs (кнопка BACK).
 #[derive(Component, Clone, Copy)]
-enum MenuAction {
+pub enum MenuAction {
     Play,
+    Settings,
     Resume,
     ExitToMenu,
     ExitGame,
@@ -60,7 +62,7 @@ macro_rules! menu_button {
                 b.spawn((
                     Text::new($label),
                     TextFont {
-                        font_size: FontSize::Px(30.0), // Изменено
+                        font_size: FontSize::Px(30.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -93,18 +95,10 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("MINECRAFT RUST"),
                 TextFont {
-                    font_size: FontSize::Px(82.0), // Изменено
+                    font_size: FontSize::Px(82.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
-            ));
-
-            root.spawn((
-                TextFont {
-                    font_size: FontSize::Px(16.0), // Изменено
-                    ..default()
-                },
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
             ));
 
             root.spawn(Node {
@@ -112,8 +106,9 @@ fn spawn_menus(mut commands: Commands) {
                 ..default()
             });
 
-            menu_button!(root, MenuAction::Play, "PLAY");
-            menu_button!(root, MenuAction::ExitGame, "EXIT");
+            menu_button!(root, MenuAction::Play,       "PLAY");
+            menu_button!(root, MenuAction::Settings,   "SETTINGS");
+            menu_button!(root, MenuAction::ExitGame,   "EXIT");
         });
 
     commands
@@ -137,7 +132,7 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("PAUSED"),
                 TextFont {
-                    font_size: FontSize::Px(72.0), // Изменено
+                    font_size: FontSize::Px(72.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -148,9 +143,9 @@ fn spawn_menus(mut commands: Commands) {
                 ..default()
             });
 
-            menu_button!(root, MenuAction::Resume, "RESUME");
+            menu_button!(root, MenuAction::Resume,     "RESUME");
             menu_button!(root, MenuAction::ExitToMenu, "EXIT TO MENU");
-            menu_button!(root, MenuAction::ExitGame, "QUIT GAME");
+            menu_button!(root, MenuAction::ExitGame,   "QUIT GAME");
 
             root.spawn(Node {
                 height: Val::Px(30.0),
@@ -160,7 +155,7 @@ fn spawn_menus(mut commands: Commands) {
             root.spawn((
                 Text::new("Press ESC to resume"),
                 TextFont {
-                    font_size: FontSize::Px(14.0), // Изменено
+                    font_size: FontSize::Px(14.0),
                     ..default()
                 },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
@@ -203,6 +198,10 @@ fn handle_menu_buttons(
                     info!("Menu action: Play / Resume");
                     next_state.set(AppState::InGame);
                 }
+                MenuAction::Settings => {
+                    info!("Menu action: Open settings");
+                    next_state.set(AppState::Settings);
+                }
                 MenuAction::ExitToMenu => {
                     info!("Menu action: Exit to menu");
                     next_state.set(AppState::Menu);
@@ -242,6 +241,10 @@ fn handle_escape_key(
             info!("Escape -> InGame");
             next_state.set(AppState::InGame);
         }
+        AppState::Settings => {
+            info!("Escape -> Menu");
+            next_state.set(AppState::Menu);
+        }
         AppState::Menu => {
         }
     }
@@ -256,9 +259,10 @@ fn update_cursor_for_state(
     }
 
     let (visible, mode) = match state.get() {
-        AppState::InGame => (false, CursorGrabMode::Confined),
-        AppState::Paused => (true,  CursorGrabMode::None),
-        AppState::Menu   => (true,  CursorGrabMode::None),
+        AppState::InGame   => (false, CursorGrabMode::Confined),
+        AppState::Paused   => (true,  CursorGrabMode::None),
+        AppState::Menu     => (true,  CursorGrabMode::None),
+        AppState::Settings => (true,  CursorGrabMode::None),
     };
 
     for mut cursor in cursor_q.iter_mut() {

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::RngExt; // Изменено с `rand::Rng`
 
-use crate::core::state::AppState;
+use crate::core::state::{AppState, Settings};
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 
@@ -64,8 +64,6 @@ impl MobType {
             MobType::Pig => Vec3::new(0.6, 0.5, 1.0),
             MobType::Sheep => Vec3::new(0.8, 0.55, 1.1),
             MobType::Cow => Vec3::new(0.75, 0.625, 1.125),
-            // Курица — плотное, но компактное тельце.
-            // Было (0.32, 0.30, 0.42) — слишком «плоское».
             MobType::Chicken => Vec3::new(0.34, 0.34, 0.42),
         }
     }
@@ -75,7 +73,6 @@ impl MobType {
             MobType::Pig => Vec3::new(0.5, 0.5, 0.5),
             MobType::Sheep => Vec3::new(0.5, 0.5, 0.5),
             MobType::Cow => Vec3::new(0.5, 0.5, 0.5),
-            // Голова курицы почти как тело — так она читается
             MobType::Chicken => Vec3::new(0.30, 0.32, 0.28),
         }
     }
@@ -85,8 +82,6 @@ impl MobType {
             MobType::Pig => Vec3::new(0.22, 0.375, 0.22),
             MobType::Sheep => Vec3::new(0.22, 0.5, 0.22),
             MobType::Cow => Vec3::new(0.22, 0.75, 0.22),
-            // Лапы короче и чуть толще — иначе курица выглядит
-            // «длинноногим журавлём». Было (0.06, 0.22, 0.06).
             MobType::Chicken => Vec3::new(0.08, 0.16, 0.08),
         }
     }
@@ -169,8 +164,42 @@ impl Plugin for MobAiPlugin {
             )
                 .chain()
                 .run_if(in_state(AppState::InGame)),
+        )
+        .add_systems(
+            Update,
+            update_mob_visibility.run_if(in_state(AppState::InGame)),
         );
         info!("MobAiPlugin loaded.");
+    }
+}
+
+/// Скрывает мобов за пределами render_distance — иначе их видно
+/// «сквозь» невидимые чанки.
+fn update_mob_visibility(
+    settings: Res<Settings>,
+    player_q: Query<&Transform, With<Player>>,
+    mut q: Query<(&Transform, &mut Visibility), With<Mob>>,
+) {
+    let Ok(pt) = player_q.single() else { return; };
+    let px = pt.translation.x;
+    let pz = pt.translation.z;
+    let rd = settings.render_distance;
+    let rd_sq = rd * rd;
+
+    for (tf, mut vis) in q.iter_mut() {
+        let dx = tf.translation.x - px;
+        let dz = tf.translation.z - pz;
+        let d_sq = dx * dx + dz * dz;
+
+        let new_vis = if d_sq <= rd_sq {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+
+        if *vis != new_vis {
+            *vis = new_vis;
+        }
     }
 }
 
