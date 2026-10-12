@@ -17,11 +17,34 @@ pub struct BreakProgress {
     pub progress: f32,
 }
 
+/// Рандомизатор питча — как в MC: при каждом действии
+/// питч гуляет в диапазоне 0.8–1.0.
+#[derive(Resource)]
+pub struct SoundRng(pub u32);
+
+impl Default for SoundRng {
+    fn default() -> Self {
+        Self(0x9E37_79B9)
+    }
+}
+
+impl SoundRng {
+    /// Возвращает случайный питч в диапазоне [0.8, 1.0].
+    /// Именно этот разброс даёт тот самый «живой» звук MC.
+    pub fn pitch(&mut self) -> f32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let n = (self.0 >> 16) & 0x7FFF;
+        let t = n as f32 / 0x7FFF as f32;
+        0.8 + t * 0.2
+    }
+}
+
 pub struct BreakingPlugin;
 
 impl Plugin for BreakingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BreakProgress>()
+            .init_resource::<SoundRng>()
             .add_systems(
                 Update,
                 (
@@ -36,12 +59,12 @@ impl Plugin for BreakingPlugin {
     }
 }
 
-/// Игрок ударил моба (мгновенно на just_pressed ЛКМ).
 fn handle_attack_mob(
     mouse: Res<ButtonInput<MouseButton>>,
     target_mob: Res<TargetMob>,
     mut mob_q: Query<&mut Mob>,
     sounds: Option<Res<SoundHandles>>,
+    mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
     if !mouse.just_pressed(MouseButton::Left) {
@@ -64,14 +87,17 @@ fn handle_attack_mob(
     }
 
     if let Some(s) = sounds.as_ref() {
+        // Небольшой разброс питча — удар звучит по-разному.
+        let pitch = 0.9 + (rng.pitch() - 0.8) * 0.5;
         commands.spawn((
             AudioPlayer(s.hit_mob.clone()),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(0.6)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(0.6))
+                .with_speed(pitch),
         ));
     }
 }
 
-/// Ломание блока — удержанием ЛКМ, с прогрессом и звуком.
 fn handle_break_block(
     time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -81,10 +107,10 @@ fn handle_break_block(
     mut world: ResMut<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     sounds: Option<Res<SoundHandles>>,
+    mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
     let held = mouse.pressed(MouseButton::Left);
-    // Если в прицеле моб — блоки не ломаем, приоритет у атаки.
     let mob_targeted = target_mob.entity.is_some();
 
     let new_target = if held && !mob_targeted {
@@ -93,47 +119,38 @@ fn handle_break_block(
         None
     };
 
-    // Сменили блок или отпустили ЛКМ — сбрасываем прогресс.
     if progress.target != new_target {
         progress.target = new_target;
         progress.progress = 0.0;
     }
 
     let Some(pos) = progress.target else { return; };
-
-    // Бедрок (нижний слой) не ломается.
-    if pos.y <= 0 {
-        return;
-    }
+    if pos.y <= 0 { return; }
 
     progress.progress += time.delta_secs() / BREAK_TIME;
+    if progress.progress < 1.0 { return; }
 
-    if progress.progress < 1.0 {
-        return;
-    }
-
-    // Блок сломан — обнуляем состояние и удаляем его из мира.
     progress.progress = 0.0;
     progress.target = None;
 
     let block = world.get(pos.x, pos.y, pos.z);
-    if !block.is_solid() {
-        return;
-    }
+    if !block.is_solid() { return; }
 
     world.set(pos.x, pos.y, pos.z, BlockType::Air);
     dirty.mark(pos.x, pos.z);
 
-    // Звук — по материалу сломанного блока.
     if let Some(s) = sounds.as_ref() {
+        // Звук по материалу + случайный питч 0.8–1.0, как в MC.
+        let pitch = rng.pitch();
         commands.spawn((
             AudioPlayer(s.break_sound_for(block)),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(0.55)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(0.55))
+                .with_speed(pitch),
         ));
     }
 }
 
-/// Установка блока ПКМ — мгновенно, со звуком.
 fn handle_place(
     mouse: Res<ButtonInput<MouseButton>>,
     target: Res<TargetBlock>,
@@ -142,11 +159,11 @@ fn handle_place(
     mut dirty: ResMut<DirtyChunks>,
     player_q: Query<&Transform, With<Player>>,
     sounds: Option<Res<SoundHandles>>,
+    mut rng: ResMut<SoundRng>,
     mut commands: Commands,
 ) {
     if !mouse.just_pressed(MouseButton::Right) { return; }
     let Some(hit) = target.hit else { return; };
-
     if hit.normal == IVec3::ZERO { return; }
 
     let pos = hit.prev;
@@ -162,9 +179,13 @@ fn handle_place(
     dirty.mark(pos.x, pos.z);
 
     if let Some(s) = sounds.as_ref() {
+        // Установка тоже с разбросом питча — как в MC.
+        let pitch = rng.pitch();
         commands.spawn((
             AudioPlayer(s.place_block.clone()),
-            PlaybackSettings::DESPAWN.with_volume(Volume::Linear(0.55)),
+            PlaybackSettings::DESPAWN
+                .with_volume(Volume::Linear(0.55))
+                .with_speed(pitch),
         ));
     }
 }
