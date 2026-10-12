@@ -35,6 +35,7 @@ const TILE_LEG:    u32 = 2;
 const TILE_DETAIL: u32 = 3;
 const TILE_EYE:    u32 = 4;
 const TILE_EXTRA:  u32 = 5;
+const TILE_WHITE:  u32 = 6; // Тёплый кремовый для «белка» глаза
 
 const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([ 1.0, 0.0, 0.0], [[ 1.0,-1.0, 1.0],[ 1.0,-1.0,-1.0],[ 1.0, 1.0,-1.0],[ 1.0, 1.0, 1.0]]),
@@ -244,6 +245,15 @@ fn make_atlas(mt: MobType) -> Image {
         ]
     });
 
+    // «Белок» глаза — тёплый кремовый, а не чисто-белый.
+    // Раньше был почти белым и сильно «светил» на весь экран.
+    draw_tile(&mut data, TILE_WHITE, |x, y| {
+        let n = hash(x, y, 7);
+        // 208..=222 — мягкий кремовый, без резкого контраста
+        let v: u8 = if n < 0.20 { 208 } else if n > 0.80 { 222 } else { 215 };
+        [(v as f32 * 0.98) as u8, v, (v as f32 * 0.90) as u8, 255]
+    });
+
     let mut img = Image::new(
         Extent3d {
             width: ATLAS_W,
@@ -282,7 +292,6 @@ fn build_body_mesh(mt: MobType) -> Mesh {
 
     b.add_cube(Vec3::new(0.0, body_center_y, 0.0), body_size, TILE_BODY);
 
-    // У овцы «голова» — шерсть (TILE_BODY), коричневая только морда спереди.
     let head_tile = if matches!(mt, MobType::Sheep) {
         TILE_BODY
     } else {
@@ -299,6 +308,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
         // СВИНЬЯ
         // --------------------------------------------------
         MobType::Pig => {
+            // Пятачок
             let snout_size = Vec3::new(head_size.x * 0.55, head_size.y * 0.42, 0.06);
             let snout_y = head_center_y - head_size.y * 0.15;
             let snout_z = head_front_z - snout_size.z * 0.5;
@@ -309,6 +319,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 TILE_BODY,
             );
 
+            // Ноздри
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -321,18 +332,30 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 );
             }
 
+            // Глаза — доминирующий зрачок + тонкая светлая кайма.
+            // Зрачок 0.11, белок 0.13 — видна только узкая окантовка.
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
                         sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.05,
+                        head_center_y + head_size.y * 0.12,
                         head_front_z - 0.004,
                     ),
-                    Vec3::new(0.09, 0.09, 0.008),
+                    Vec3::new(0.13, 0.13, 0.008),
+                    TILE_WHITE,
+                );
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.30,
+                        head_center_y + head_size.y * 0.12,
+                        head_front_z - 0.011,
+                    ),
+                    Vec3::new(0.11, 0.11, 0.008),
                     TILE_EYE,
                 );
             }
 
+            // Ушки
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -350,6 +373,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
         // ОВЦА
         // --------------------------------------------------
         MobType::Sheep => {
+            // Коричневая морда-маска на передней части головы
             let muzzle = Vec3::new(head_size.x * 0.85, head_size.y * 0.60, 0.04);
             let muzzle_y = head_center_y - head_size.y * 0.08;
             let muzzle_z = head_front_z - muzzle.z * 0.5;
@@ -360,6 +384,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 TILE_HEAD,
             );
 
+            // Ноздри
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -372,18 +397,29 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 );
             }
 
+            // Глаза — доминирующий зрачок + тонкая кайма
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
-                        sx * head_size.x * 0.32,
+                        sx * head_size.x * 0.30,
                         head_center_y + head_size.y * 0.10,
                         head_front_z - muzzle.z - 0.006,
                     ),
-                    Vec3::new(0.10, 0.10, 0.010),
+                    Vec3::new(0.13, 0.13, 0.008),
+                    TILE_WHITE,
+                );
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.30,
+                        head_center_y + head_size.y * 0.10,
+                        head_front_z - muzzle.z - 0.013,
+                    ),
+                    Vec3::new(0.11, 0.11, 0.008),
                     TILE_EYE,
                 );
             }
 
+            // Ушки
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -411,7 +447,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 TILE_DETAIL,
             );
 
-            // Ноздри — на передней плоскости муфты
+            // Ноздри
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -424,7 +460,7 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 );
             }
 
-            // Белый «блик» (blaze) на лбу — вертикальная полоска
+            // Белый «блик» (blaze) на лбу
             b.add_cube(
                 Vec3::new(
                     0.0,
@@ -435,10 +471,8 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                 TILE_DETAIL,
             );
 
-            // Глаза — по бокам от блика, ВЫШЕ верхней кромки муфты.
-            // Муфта сверху доходит до head_center_y + 0.06*h,
-            // поэтому ставим глаза на +0.22*h — гарантированно выше неё.
-            // По Z держим чуть впереди лба, но не залезаем на муфту.
+            // Глаза — доминирующий зрачок + тонкая кайма.
+            // Чуть подняты над муфтой, чтобы не перекрывались.
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
@@ -446,7 +480,16 @@ fn build_body_mesh(mt: MobType) -> Mesh {
                         head_center_y + head_size.y * 0.22,
                         head_front_z - 0.008,
                     ),
-                    Vec3::new(0.10, 0.10, 0.012),
+                    Vec3::new(0.13, 0.13, 0.008),
+                    TILE_WHITE,
+                );
+                b.add_cube(
+                    Vec3::new(
+                        sx * head_size.x * 0.30,
+                        head_center_y + head_size.y * 0.22,
+                        head_front_z - 0.015,
+                    ),
+                    Vec3::new(0.11, 0.11, 0.008),
                     TILE_EYE,
                 );
             }
@@ -542,36 +585,41 @@ fn build_body_mesh(mt: MobType) -> Mesh {
         // КУРИЦА
         // --------------------------------------------------
         MobType::Chicken => {
+            // Клюв
             b.add_cube(
                 Vec3::new(0.0, head_center_y - head_size.y * 0.05, head_front_z - 0.04),
                 Vec3::new(0.10, 0.06, 0.08),
                 TILE_DETAIL,
             );
 
+            // Гребень сверху
             b.add_cube(
                 Vec3::new(0.0, head_center_y + head_size.y * 0.5 + 0.05, head_center_z),
                 Vec3::new(0.10, 0.10, 0.18),
                 TILE_EXTRA,
             );
 
+            // Серёжка снизу
             b.add_cube(
                 Vec3::new(0.0, head_center_y - head_size.y * 0.5 - 0.03, head_front_z - 0.02),
                 Vec3::new(0.06, 0.08, 0.05),
                 TILE_EXTRA,
             );
 
+            // Глаза — только зрачок (белок сливался бы с белой головой)
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(
                         sx * head_size.x * 0.35,
-                        head_center_y + head_size.y * 0.15,
-                        head_front_z - 0.003,
+                        head_center_y + head_size.y * 0.18,
+                        head_front_z - 0.004,
                     ),
-                    Vec3::new(0.05, 0.05, 0.01),
+                    Vec3::new(0.10, 0.10, 0.010),
                     TILE_EYE,
                 );
             }
 
+            // Крылышки по бокам тушки
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
                     Vec3::new(

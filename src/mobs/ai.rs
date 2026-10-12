@@ -19,7 +19,7 @@ impl MobType {
             MobType::Pig => 0.9,
             MobType::Sheep => 1.15,
             MobType::Cow => 1.45,
-            MobType::Chicken => 0.7,
+            MobType::Chicken => 0.66,
         }
     }
 
@@ -62,20 +62,21 @@ impl MobType {
     pub fn body_size(self) -> Vec3 {
         match self {
             MobType::Pig => Vec3::new(0.6, 0.5, 1.0),
-            // Овца — приземистая и вытянутая, шире чем выше
             MobType::Sheep => Vec3::new(0.8, 0.55, 1.1),
             MobType::Cow => Vec3::new(0.75, 0.625, 1.125),
-            MobType::Chicken => Vec3::new(0.3, 0.4, 0.4),
+            // Курица — плотное, но компактное тельце.
+            // Было (0.32, 0.30, 0.42) — слишком «плоское».
+            MobType::Chicken => Vec3::new(0.34, 0.34, 0.42),
         }
     }
 
     pub fn head_size(self) -> Vec3 {
         match self {
             MobType::Pig => Vec3::new(0.5, 0.5, 0.5),
-            // Голова овцы — крупная, чтобы читалась издалека
             MobType::Sheep => Vec3::new(0.5, 0.5, 0.5),
             MobType::Cow => Vec3::new(0.5, 0.5, 0.5),
-            MobType::Chicken => Vec3::new(0.2, 0.3, 0.2),
+            // Голова курицы почти как тело — так она читается
+            MobType::Chicken => Vec3::new(0.30, 0.32, 0.28),
         }
     }
 
@@ -84,7 +85,9 @@ impl MobType {
             MobType::Pig => Vec3::new(0.22, 0.375, 0.22),
             MobType::Sheep => Vec3::new(0.22, 0.5, 0.22),
             MobType::Cow => Vec3::new(0.22, 0.75, 0.22),
-            MobType::Chicken => Vec3::new(0.08, 0.25, 0.08),
+            // Лапы короче и чуть толще — иначе курица выглядит
+            // «длинноногим журавлём». Было (0.06, 0.22, 0.06).
+            MobType::Chicken => Vec3::new(0.08, 0.16, 0.08),
         }
     }
 }
