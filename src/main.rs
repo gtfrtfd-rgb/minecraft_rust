@@ -5,6 +5,7 @@ mod interaction;
 mod mobs;
 mod ui;
 mod save;
+mod audio;
 
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, Window, WindowPlugin};
@@ -15,6 +16,7 @@ use interaction::InteractionPlugin;
 use mobs::MobPlugin;
 use ui::UiPlugin;
 use save::SavePlugin;
+use audio::GameAudioPlugin;
 
 fn main() {
     App::new()
@@ -33,6 +35,7 @@ fn main() {
         }))
         .add_plugins((
             GameStatePlugin,
+            GameAudioPlugin,
             SavePlugin,
             WorldPlugin,
             PlayerPlugin,

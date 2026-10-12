@@ -15,6 +15,11 @@ const FLY_SPEED_FAST: f32 = 30.0;
 const JUMP_BUFFER: f32 = 0.15;
 const COYOTE_TIME: f32 = 0.10;
 
+/// Допуск «прилипания» к поверхности: если при падении игрок
+/// останавливается за 0.001..0.5 блока над верхней гранью, мы
+/// подтягиваем его ровно к грани, чтобы on_ground не дёргался.
+const GROUND_SNAP: f32 = 0.5;
+
 #[derive(Component)]
 pub struct Player {
     pub velocity: Vec3,
@@ -102,6 +107,38 @@ fn collides(world: &WorldData, px: f32, py: f32, pz: f32) -> bool {
         }
     }
     false
+}
+
+/// Ищет верхнюю грань блока, на котором стоит игрок, если он
+/// находится прямо над ней. Возвращает None, если под ногами
+/// нет ничего близкого.
+fn ground_surface_below(world: &WorldData, px: f32, py: f32, pz: f32) -> Option<f32> {
+    let x0 = (px - PLAYER_RADIUS).floor() as i32;
+    let x1 = (px + PLAYER_RADIUS).floor() as i32;
+    let z0 = (pz - PLAYER_RADIUS).floor() as i32;
+    let z1 = (pz + PLAYER_RADIUS).floor() as i32;
+
+    // Ищем самый верхний solid-блок в диапазоне y ∈ [py - GROUND_SNAP, py).
+    let mut best: Option<f32> = None;
+
+    let y_min = (py - GROUND_SNAP).floor() as i32;
+    let y_max = py.ceil() as i32;
+
+    for y in y_min..y_max {
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                if world.is_solid(x, y, z) {
+                    let top = (y + 1) as f32;
+                    // Берём только грани, которые чуть-чуть ниже ног
+                    // или на уровне ног (с точностью до epsilon).
+                    if top <= py + 0.001 && top >= py - GROUND_SNAP {
+                        best = Some(best.map_or(top, |b: f32| b.max(top)));
+                    }
+                }
+            }
+        }
+    }
+    best
 }
 
 fn player_movement(
@@ -204,11 +241,21 @@ fn player_movement(
 
         let was_on_ground = player.on_ground;
         let new_y = pos.y + player.velocity.y * dt;
+
         if !collides(&world, transform.translation.x, new_y, transform.translation.z) {
+            // Свободное падение или подъём.
             transform.translation.y = new_y;
             player.on_ground = false;
         } else {
+            // Коллизия. Если падаем — «прилипаем» к верхней грани
+            // блока под ногами. Это устраняет дрожание on_ground,
+            // из-за которого раньше двоились шаги и портился
+            // coyote-time.
             if player.velocity.y < 0.0 {
+                let here = transform.translation;
+                if let Some(top) = ground_surface_below(&world, here.x, here.y, here.z) {
+                    transform.translation.y = top;
+                }
                 player.on_ground = true;
             }
             player.velocity.y = 0.0;

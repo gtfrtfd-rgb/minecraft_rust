@@ -3,6 +3,7 @@ use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
 use crate::player::camera::PlayerCamera;
 use crate::mobs::ai::Mob;
+use super::breaking::BreakProgress;
 
 pub const REACH_DISTANCE: f32 = 5.0;
 const HIGHLIGHT_MIN_DIST: f32 = 0.5;
@@ -107,6 +108,7 @@ fn update_target_mob(
 fn draw_target_highlight(
     mut gizmos: Gizmos,
     target: Res<TargetBlock>,
+    progress: Res<BreakProgress>,
     cam_q: Query<&Transform, With<PlayerCamera>>,
 ) {
     let Some(hit) = target.hit else { return; };
@@ -128,10 +130,29 @@ fn draw_target_highlight(
         return;
     }
 
+    // Обычно — чёрный контур. Если по этому блоку идёт ломание,
+    // плавно перекрашиваем в тёплый оранжево-красный по прогрессу.
+    let t = if progress.target == Some(hit.block) {
+        progress.progress.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // t=0.0 → чёрный, t=0.5 → оранжевый, t=1.0 → насыщенный красный.
+    let color = if t <= 0.0 {
+        Color::BLACK
+    } else if t < 0.5 {
+        let k = t / 0.5;
+        Color::srgb(k * 1.0, k * 0.55, 0.0)
+    } else {
+        let k = (t - 0.5) / 0.5;
+        Color::srgb(1.0, 0.55 * (1.0 - k) + 0.10 * k, 0.0)
+    };
+
     let center = bmin + Vec3::splat(0.5);
     gizmos.cube(
         Transform::from_translation(center).with_scale(Vec3::splat(1.002)),
-        Color::BLACK,
+        color,
     );
 }
 
