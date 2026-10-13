@@ -3,7 +3,9 @@ use bevy::app::AppExit;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::core::state::{AppState, Settings};
+use crate::core::state::{
+    AppState, Settings, FPS_OPTIONS, RESOLUTION_OPTIONS,
+};
 
 const BTN_NORMAL: Color   = Color::srgb(0.18, 0.26, 0.38);
 const BTN_HOVER:  Color   = Color::srgb(0.30, 0.50, 0.72);
@@ -18,6 +20,9 @@ enum SettingsField {
     MasterVolume,
     MouseSensitivity,
     RenderDistance,
+    FpsLimit,
+    Resolution,
+    VSync,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -102,8 +107,8 @@ macro_rules! settings_row {
     ($parent:expr, $field:expr, $label:expr) => {
         $parent
             .spawn(Node {
-                width: Val::Px(600.0),
-                height: Val::Px(52.0),
+                width: Val::Px(620.0),
+                height: Val::Px(44.0),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(10.0),
@@ -113,7 +118,7 @@ macro_rules! settings_row {
                 row.spawn((
                     Text::new($label),
                     TextFont {
-                        font_size: FontSize::Px(22.0),
+                        font_size: FontSize::Px(20.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -123,13 +128,13 @@ macro_rules! settings_row {
                     },
                 ));
 
-                // Минус (ASCII-дефис — default font Bevy не имеет U+2212)
+                // Минус
                 row.spawn((
                     Button,
                     Interaction::default(),
                     Node {
-                        width: Val::Px(42.0),
-                        height: Val::Px(42.0),
+                        width: Val::Px(36.0),
+                        height: Val::Px(36.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(2.0)),
@@ -143,7 +148,7 @@ macro_rules! settings_row {
                     b.spawn((
                         Text::new("-"),
                         TextFont {
-                            font_size: FontSize::Px(28.0),
+                            font_size: FontSize::Px(24.0),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -153,12 +158,12 @@ macro_rules! settings_row {
                 row.spawn((
                     Text::new("--"),
                     TextFont {
-                        font_size: FontSize::Px(22.0),
+                        font_size: FontSize::Px(20.0),
                         ..default()
                     },
                     TextColor(Color::srgb(0.85, 0.95, 0.65)),
                     Node {
-                        width: Val::Px(110.0),
+                        width: Val::Px(150.0),
                         ..default()
                     },
                     SettingValueText($field),
@@ -168,8 +173,8 @@ macro_rules! settings_row {
                     Button,
                     Interaction::default(),
                     Node {
-                        width: Val::Px(42.0),
-                        height: Val::Px(42.0),
+                        width: Val::Px(36.0),
+                        height: Val::Px(36.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(2.0)),
@@ -183,7 +188,7 @@ macro_rules! settings_row {
                     b.spawn((
                         Text::new("+"),
                         TextFont {
-                            font_size: FontSize::Px(28.0),
+                            font_size: FontSize::Px(24.0),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -203,7 +208,7 @@ fn spawn_settings_menu(mut commands: Commands) {
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(12.0),
+                row_gap: Val::Px(4.0),
                 display: Display::None,
                 ..default()
             },
@@ -215,23 +220,26 @@ fn spawn_settings_menu(mut commands: Commands) {
             root.spawn((
                 Text::new("SETTINGS"),
                 TextFont {
-                    font_size: FontSize::Px(72.0),
+                    font_size: FontSize::Px(52.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
             ));
 
             root.spawn(Node {
-                height: Val::Px(30.0),
+                height: Val::Px(16.0),
                 ..default()
             });
 
             settings_row!(root, SettingsField::MasterVolume,     "Master Volume");
             settings_row!(root, SettingsField::MouseSensitivity, "Mouse Sensitivity");
             settings_row!(root, SettingsField::RenderDistance,   "Render Distance (chunks)");
+            settings_row!(root, SettingsField::FpsLimit,         "FPS Limit");
+            settings_row!(root, SettingsField::VSync,            "VSync");
+            settings_row!(root, SettingsField::Resolution,       "Resolution");
 
             root.spawn(Node {
-                height: Val::Px(30.0),
+                height: Val::Px(20.0),
                 ..default()
             });
 
@@ -240,7 +248,7 @@ fn spawn_settings_menu(mut commands: Commands) {
                 Interaction::default(),
                 Node {
                     width: Val::Px(340.0),
-                    height: Val::Px(64.0),
+                    height: Val::Px(52.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
@@ -254,7 +262,7 @@ fn spawn_settings_menu(mut commands: Commands) {
                 b.spawn((
                     Text::new("BACK"),
                     TextFont {
-                        font_size: FontSize::Px(30.0),
+                        font_size: FontSize::Px(26.0),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -318,10 +326,27 @@ fn apply_delta(settings: &mut Settings, field: SettingsField, dir: f32) {
                 (settings.mouse_sensitivity + step).clamp(0.0005, 0.0060);
         }
         SettingsField::RenderDistance => {
-            // Шаг 1 чанк. Диапазон 4..=32.
             let step = dir.signum() as i32;
             settings.render_distance_chunks =
                 (settings.render_distance_chunks + step).clamp(4, 32);
+        }
+        SettingsField::FpsLimit => {
+            let step = dir.signum() as i32;
+            let len = FPS_OPTIONS.len() as i32;
+            let new_idx = (settings.fps_limit_idx as i32 + step)
+                .clamp(0, len - 1);
+            settings.fps_limit_idx = new_idx as usize;
+        }
+        SettingsField::Resolution => {
+            let step = dir.signum() as i32;
+            let len = RESOLUTION_OPTIONS.len() as i32;
+            let new_idx = (settings.resolution_idx as i32 + step)
+                .clamp(0, len - 1);
+            settings.resolution_idx = new_idx as usize;
+        }
+        SettingsField::VSync => {
+            // Toggle: любое нажатие (и +, и -) переключает.
+            settings.vsync = !settings.vsync;
         }
     }
 }
@@ -342,8 +367,23 @@ fn update_setting_texts(
                 format!("{:.4}", settings.mouse_sensitivity)
             }
             SettingsField::RenderDistance => {
-                // Только чанки — без перевода в блоки.
                 format!("{}", settings.render_distance_chunks)
+            }
+            SettingsField::FpsLimit => {
+                let limit = settings.fps_limit();
+                if limit == 0 {
+                    "Unlimited".to_string()
+                } else {
+                    format!("{}", limit)
+                }
+            }
+            SettingsField::Resolution => {
+                // ASCII "x" — default font Bevy не имеет U+00D7.
+                let (w, h) = settings.resolution();
+                format!("{}x{}", w, h)
+            }
+            SettingsField::VSync => {
+                if settings.vsync { "On".into() } else { "Off".into() }
             }
         };
     }
