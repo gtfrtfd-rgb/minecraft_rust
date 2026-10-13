@@ -3,11 +3,10 @@ use bevy::input::mouse::MouseWheel;
 use serde::{Serialize, Deserialize};
 use crate::world::chunk::BlockType;
 
-pub const SX: i32 = 256;
 pub const SY: i32 = 48;
-pub const SZ: i32 = 256;
-
 pub const CHUNK_SIZE: i32 = 16;
+pub const CHUNK_AREA: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
+pub const CHUNK_VOLUME: usize = CHUNK_AREA * SY as usize;
 
 // ============================================================
 // СОСТОЯНИЯ ИГРЫ
@@ -28,9 +27,10 @@ pub enum AppState {
 pub struct Settings {
     pub master_volume: f32,
     pub mouse_sensitivity: f32,
-    /// Дальность прорисовки в блоках. Чанки, центр которых
-    /// дальше этого расстояния от игрока, не рисуются.
-    pub render_distance: f32,
+    /// Дальность прорисовки в ЧАНКАХ. 1 чанк = 16 блоков.
+    /// Например: 8 = 128 блоков, 12 = 192, 16 = 256, 24 = 384.
+    #[serde(alias = "render_distance")]
+    pub render_distance_chunks: i32,
 }
 
 impl Default for Settings {
@@ -38,7 +38,7 @@ impl Default for Settings {
         Self {
             master_volume: 0.8,
             mouse_sensitivity: 0.0022,
-            render_distance: 160.0,
+            render_distance_chunks: 12,
         }
     }
 }

@@ -3,9 +3,9 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use rand::RngExt; // Изменено
+use rand::RngExt;
 
-use crate::core::state::{SX, SY, SZ};
+use crate::core::state::{SY, AppState};
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 use super::ai::{Mob, MobType};
@@ -14,14 +14,27 @@ pub struct MobSpawnPlugin;
 
 impl Plugin for MobSpawnPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, spawn_initial_mobs);
+        app.add_systems(Startup, setup_mob_assets)
+            .add_systems(
+                Update,
+                spawn_and_maintain_mobs.run_if(in_state(AppState::InGame)),
+            );
         info!("MobSpawnPlugin loaded.");
     }
 }
 
 const INITIAL_MOB_COUNT: usize = 40;
 const MIN_DIST_FROM_PLAYER: f32 = 16.0;
+const MAX_DIST_FROM_PLAYER: f32 = 64.0;
 const SKY_CLEARANCE: i32 = 5;
+
+/// Мобы подгружаются порциями, чтобы не фризить при старте.
+const MOBS_PER_FRAME: usize = 2;
+
+/// Каждые N секунд пробуем добавить 1 моба, если поголовье
+/// меньше целевого (после смерти или ухода за пределы видимости).
+const RESPAWN_INTERVAL: f32 = 3.0;
+const MIN_POPULATION: usize = 25;
 
 const TILE: u32 = 16;
 const ATLAS_COLS: u32 = 4;
@@ -35,7 +48,7 @@ const TILE_LEG:    u32 = 2;
 const TILE_DETAIL: u32 = 3;
 const TILE_EYE:    u32 = 4;
 const TILE_EXTRA:  u32 = 5;
-const TILE_WHITE:  u32 = 6; // Тёплый кремовый для «белка» глаза
+const TILE_WHITE:  u32 = 6;
 
 const CUBE_FACES: [([f32; 3], [[f32; 3]; 4]); 6] = [
     ([ 1.0, 0.0, 0.0], [[ 1.0,-1.0, 1.0],[ 1.0,-1.0,-1.0],[ 1.0, 1.0,-1.0],[ 1.0, 1.0, 1.0]]),
@@ -69,18 +82,12 @@ struct MeshBuilder {
 
 impl MeshBuilder {
     fn new() -> Self {
-        Self {
-            positions: Vec::new(),
-            normals: Vec::new(),
-            uvs: Vec::new(),
-            indices: Vec::new(),
-        }
+        Self { positions: Vec::new(), normals: Vec::new(), uvs: Vec::new(), indices: Vec::new() }
     }
 
     fn add_cube(&mut self, center: Vec3, size: Vec3, tile: u32) {
         let half = size * 0.5;
         let tuv = tile_uv(tile);
-
         for (normal, corners) in CUBE_FACES.iter() {
             let base = self.positions.len() as u32;
             for (j, c) in corners.iter().enumerate() {
@@ -92,18 +99,12 @@ impl MeshBuilder {
                 self.normals.push(*normal);
                 self.uvs.push(tuv[j]);
             }
-            self.indices.extend_from_slice(&[
-                base, base + 1, base + 2,
-                base, base + 2, base + 3,
-            ]);
+            self.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
     }
 
     fn build(self) -> Mesh {
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        );
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
@@ -112,14 +113,7 @@ impl MeshBuilder {
     }
 }
 
-struct MobColors {
-    body: Color,
-    head: Color,
-    leg: Color,
-    detail: Color,
-    extra: Color,
-    eye: Color,
-}
+struct MobColors { body: Color, head: Color, leg: Color, detail: Color, extra: Color, eye: Color }
 
 fn colors_for(mt: MobType) -> MobColors {
     match mt {
@@ -151,8 +145,8 @@ fn colors_for(mt: MobType) -> MobColors {
             body:   Color::srgb(0.98, 0.98, 0.98),
             head:   Color::srgb(0.98, 0.98, 0.98),
             leg:    Color::srgb(0.92, 0.62, 0.12),
-            detail: Color::srgb(0.95, 0.65, 0.15),
-            extra:  Color::srgb(0.85, 0.15, 0.15),
+            detail: Color::srgb(0.98, 0.68, 0.10),
+            extra:  Color::srgb(0.82, 0.14, 0.14),
             eye:    Color::srgb(0.05, 0.03, 0.05),
         },
     }
@@ -180,17 +174,11 @@ fn rgb(c: Color) -> [u8; 3] {
 
 fn shade_pixel(base: [u8; 3], x: u32, y: u32, seed: u32, intensity: i32) -> [u8; 4] {
     let n = hash(x, y, seed);
-    let delta = if n < 0.12 {
-        -intensity
-    } else if n > 0.88 {
-        intensity
-    } else if n < 0.30 {
-        -(intensity / 2)
-    } else if n > 0.70 {
-        intensity / 2
-    } else {
-        0
-    };
+    let delta = if n < 0.12 { -intensity }
+        else if n > 0.88 { intensity }
+        else if n < 0.30 { -(intensity / 2) }
+        else if n > 0.70 { intensity / 2 }
+        else { 0 };
     [
         (base[0] as i32 + delta).clamp(0, 255) as u8,
         (base[1] as i32 + delta).clamp(0, 255) as u8,
@@ -200,8 +188,7 @@ fn shade_pixel(base: [u8; 3], x: u32, y: u32, seed: u32, intensity: i32) -> [u8;
 }
 
 fn draw_tile<F>(data: &mut [u8], tile_idx: u32, f: F)
-where
-    F: Fn(u32, u32) -> [u8; 4],
+where F: Fn(u32, u32) -> [u8; 4]
 {
     let tx = (tile_idx % ATLAS_COLS) * TILE;
     let ty = (tile_idx / ATLAS_COLS) * TILE;
@@ -209,10 +196,7 @@ where
         for px in 0..TILE {
             let c = f(px, py);
             let o = (((ty + py) * ATLAS_W + (tx + px)) * 4) as usize;
-            data[o]     = c[0];
-            data[o + 1] = c[1];
-            data[o + 2] = c[2];
-            data[o + 3] = c[3];
+            data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = c[3];
         }
     }
 }
@@ -220,7 +204,6 @@ where
 fn make_atlas(mt: MobType) -> Image {
     let c = colors_for(mt);
     let mut data = vec![0u8; (ATLAS_W * ATLAS_H * 4) as usize];
-
     let body   = rgb(c.body);
     let head   = rgb(c.head);
     let leg    = rgb(c.leg);
@@ -233,7 +216,6 @@ fn make_atlas(mt: MobType) -> Image {
     draw_tile(&mut data, TILE_LEG,    |x, y| shade_pixel(leg,    x, y, 3, 12));
     draw_tile(&mut data, TILE_DETAIL, |x, y| shade_pixel(detail, x, y, 4,  8));
     draw_tile(&mut data, TILE_EXTRA,  |x, y| shade_pixel(extra,  x, y, 6, 10));
-
     draw_tile(&mut data, TILE_EYE, |x, y| {
         let n = hash(x, y, 5);
         let v = if n > 0.75 { 22 } else { 0 };
@@ -244,393 +226,154 @@ fn make_atlas(mt: MobType) -> Image {
             255,
         ]
     });
-
-    // «Белок» глаза — тёплый кремовый, а не чисто-белый.
-    // Раньше был почти белым и сильно «светил» на весь экран.
     draw_tile(&mut data, TILE_WHITE, |x, y| {
         let n = hash(x, y, 7);
-        // 208..=222 — мягкий кремовый, без резкого контраста
         let v: u8 = if n < 0.20 { 208 } else if n > 0.80 { 222 } else { 215 };
         [(v as f32 * 0.98) as u8, v, (v as f32 * 0.90) as u8, 255]
     });
 
     let mut img = Image::new(
-        Extent3d {
-            width: ATLAS_W,
-            height: ATLAS_H,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
+        Extent3d { width: ATLAS_W, height: ATLAS_H, depth_or_array_layers: 1 },
+        TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
     img.sampler = ImageSampler::nearest();
     img
 }
 
-// ============================================================
-// ГЕОМЕТРИЯ МОБОВ (в стиле Minecraft)
-// ============================================================
-
 fn build_body_mesh(mt: MobType) -> Mesh {
     let mut b = MeshBuilder::new();
-
     let body_size = mt.body_size();
     let head_size = mt.head_size();
     let leg_size  = mt.leg_size();
 
-    // Туловище
     let body_bottom = leg_size.y;
     let body_top    = body_bottom + body_size.y;
     let body_center_y = (body_bottom + body_top) * 0.5;
 
-    // Голова — вперёд, верх головы совпадает с верхом туловища
     let head_center_y = body_top - head_size.y * 0.5;
     let head_center_z = -(body_size.z * 0.5 + head_size.z * 0.5);
     let head_front_z  = head_center_z - head_size.z * 0.5;
 
     b.add_cube(Vec3::new(0.0, body_center_y, 0.0), body_size, TILE_BODY);
 
-    let head_tile = if matches!(mt, MobType::Sheep) {
-        TILE_BODY
-    } else {
-        TILE_HEAD
-    };
-    b.add_cube(
-        Vec3::new(0.0, head_center_y, head_center_z),
-        head_size,
-        head_tile,
-    );
+    let head_tile = if matches!(mt, MobType::Sheep) { TILE_BODY } else { TILE_HEAD };
+    b.add_cube(Vec3::new(0.0, head_center_y, head_center_z), head_size, head_tile);
 
     match mt {
-        // --------------------------------------------------
-        // СВИНЬЯ
-        // --------------------------------------------------
         MobType::Pig => {
-            // Пятачок
             let snout_size = Vec3::new(head_size.x * 0.55, head_size.y * 0.42, 0.06);
             let snout_y = head_center_y - head_size.y * 0.15;
-            let snout_z = head_front_z - snout_size.z * 0.5;
-
-            b.add_cube(
-                Vec3::new(0.0, snout_y, snout_z),
-                snout_size,
-                TILE_BODY,
-            );
-
-            // Ноздри
+            b.add_cube(Vec3::new(0.0, snout_y, head_front_z - snout_size.z * 0.5), snout_size, TILE_BODY);
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * snout_size.x * 0.28,
-                        snout_y,
-                        head_front_z - snout_size.z - 0.004,
-                    ),
-                    Vec3::new(snout_size.x * 0.18, snout_size.y * 0.35, 0.008),
-                    TILE_EYE,
-                );
-            }
-
-            // Глаза — доминирующий зрачок + тонкая светлая кайма.
-            // Зрачок 0.11, белок 0.13 — видна только узкая окантовка.
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * snout_size.x * 0.28, snout_y, head_front_z - snout_size.z - 0.004),
+                    Vec3::new(snout_size.x * 0.18, snout_size.y * 0.35, 0.008), TILE_EYE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.12,
-                        head_front_z - 0.004,
-                    ),
-                    Vec3::new(0.13, 0.13, 0.008),
-                    TILE_WHITE,
-                );
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.12, head_front_z - 0.004),
+                    Vec3::new(0.13, 0.13, 0.008), TILE_WHITE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.12,
-                        head_front_z - 0.011,
-                    ),
-                    Vec3::new(0.11, 0.11, 0.008),
-                    TILE_EYE,
-                );
-            }
-
-            // Ушки
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.12, head_front_z - 0.011),
+                    Vec3::new(0.11, 0.11, 0.008), TILE_EYE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.36,
-                        head_center_y + head_size.y * 0.5 + 0.035,
-                        head_center_z + head_size.z * 0.15,
-                    ),
-                    Vec3::new(0.11, 0.10, 0.06),
-                    TILE_BODY,
-                );
+                    Vec3::new(sx * head_size.x * 0.36, head_center_y + head_size.y * 0.5 + 0.035, head_center_z + head_size.z * 0.15),
+                    Vec3::new(0.11, 0.10, 0.06), TILE_BODY);
             }
         }
-
-        // --------------------------------------------------
-        // ОВЦА
-        // --------------------------------------------------
         MobType::Sheep => {
-            // Коричневая морда-маска на передней части головы
             let muzzle = Vec3::new(head_size.x * 0.85, head_size.y * 0.60, 0.04);
             let muzzle_y = head_center_y - head_size.y * 0.08;
-            let muzzle_z = head_front_z - muzzle.z * 0.5;
-
-            b.add_cube(
-                Vec3::new(0.0, muzzle_y, muzzle_z),
-                muzzle,
-                TILE_HEAD,
-            );
-
-            // Ноздри
+            b.add_cube(Vec3::new(0.0, muzzle_y, head_front_z - muzzle.z * 0.5), muzzle, TILE_HEAD);
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * muzzle.x * 0.20,
-                        muzzle_y - muzzle.y * 0.15,
-                        head_front_z - muzzle.z - 0.003,
-                    ),
-                    Vec3::new(0.035, 0.035, 0.008),
-                    TILE_EYE,
-                );
-            }
-
-            // Глаза — доминирующий зрачок + тонкая кайма
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * muzzle.x * 0.20, muzzle_y - muzzle.y * 0.15, head_front_z - muzzle.z - 0.003),
+                    Vec3::new(0.035, 0.035, 0.008), TILE_EYE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.10,
-                        head_front_z - muzzle.z - 0.006,
-                    ),
-                    Vec3::new(0.13, 0.13, 0.008),
-                    TILE_WHITE,
-                );
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.10, head_front_z - muzzle.z - 0.006),
+                    Vec3::new(0.13, 0.13, 0.008), TILE_WHITE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.10,
-                        head_front_z - muzzle.z - 0.013,
-                    ),
-                    Vec3::new(0.11, 0.11, 0.008),
-                    TILE_EYE,
-                );
-            }
-
-            // Ушки
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.10, head_front_z - muzzle.z - 0.013),
+                    Vec3::new(0.11, 0.11, 0.008), TILE_EYE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * (head_size.x * 0.5 + 0.035),
-                        head_center_y + head_size.y * 0.30,
-                        head_center_z + head_size.z * 0.10,
-                    ),
-                    Vec3::new(0.06, 0.10, 0.10),
-                    TILE_HEAD,
-                );
+                    Vec3::new(sx * (head_size.x * 0.5 + 0.035), head_center_y + head_size.y * 0.30, head_center_z + head_size.z * 0.10),
+                    Vec3::new(0.06, 0.10, 0.10), TILE_HEAD);
             }
         }
-
-        // --------------------------------------------------
-        // КОРОВА
-        // --------------------------------------------------
         MobType::Cow => {
-            // Белая муфта
             let muzzle = Vec3::new(head_size.x * 0.7, head_size.y * 0.42, 0.05);
             let muzzle_y = head_center_y - head_size.y * 0.15;
-
-            b.add_cube(
-                Vec3::new(0.0, muzzle_y, head_front_z - muzzle.z * 0.5),
-                muzzle,
-                TILE_DETAIL,
-            );
-
-            // Ноздри
+            b.add_cube(Vec3::new(0.0, muzzle_y, head_front_z - muzzle.z * 0.5), muzzle, TILE_DETAIL);
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * muzzle.x * 0.22,
-                        muzzle_y,
-                        head_front_z - muzzle.z - 0.003,
-                    ),
-                    Vec3::new(0.05, 0.05, 0.008),
-                    TILE_EYE,
-                );
+                    Vec3::new(sx * muzzle.x * 0.22, muzzle_y, head_front_z - muzzle.z - 0.003),
+                    Vec3::new(0.05, 0.05, 0.008), TILE_EYE);
             }
-
-            // Белый «блик» (blaze) на лбу
             b.add_cube(
-                Vec3::new(
-                    0.0,
-                    head_center_y + head_size.y * 0.18,
-                    head_front_z - 0.005,
-                ),
-                Vec3::new(head_size.x * 0.22, head_size.y * 0.42, 0.008),
-                TILE_DETAIL,
-            );
-
-            // Глаза — доминирующий зрачок + тонкая кайма.
-            // Чуть подняты над муфтой, чтобы не перекрывались.
+                Vec3::new(0.0, head_center_y + head_size.y * 0.18, head_front_z - 0.005),
+                Vec3::new(head_size.x * 0.22, head_size.y * 0.42, 0.008), TILE_DETAIL);
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.22,
-                        head_front_z - 0.008,
-                    ),
-                    Vec3::new(0.13, 0.13, 0.008),
-                    TILE_WHITE,
-                );
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.22, head_front_z - 0.008),
+                    Vec3::new(0.13, 0.13, 0.008), TILE_WHITE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.30,
-                        head_center_y + head_size.y * 0.22,
-                        head_front_z - 0.015,
-                    ),
-                    Vec3::new(0.11, 0.11, 0.008),
-                    TILE_EYE,
-                );
+                    Vec3::new(sx * head_size.x * 0.30, head_center_y + head_size.y * 0.22, head_front_z - 0.015),
+                    Vec3::new(0.11, 0.11, 0.008), TILE_EYE);
+                b.add_cube(
+                    Vec3::new(sx * head_size.x * 0.34, head_center_y + head_size.y * 0.5 + 0.045, head_center_z + 0.02),
+                    Vec3::new(0.08, 0.11, 0.08), TILE_DETAIL);
+                b.add_cube(
+                    Vec3::new(sx * (head_size.x * 0.5 + 0.04), head_center_y + head_size.y * 0.02, head_center_z + 0.05),
+                    Vec3::new(0.10, 0.14, 0.06), TILE_HEAD);
             }
 
-            // Рожки
+            let eps = 0.008;
+            let spot_th = 0.016;
+            let body_hx = body_size.x * 0.5;
+            let body_hy = body_size.y * 0.5;
+            let body_hz = body_size.z * 0.5;
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.34,
-                        head_center_y + head_size.y * 0.5 + 0.045,
-                        head_center_z + 0.02,
-                    ),
-                    Vec3::new(0.08, 0.11, 0.08),
-                    TILE_DETAIL,
-                );
-            }
-
-            // Ушки
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * (body_hx + eps), body_center_y + body_hy * 0.25, body_hz * 0.15),
+                    Vec3::new(spot_th, body_size.y * 0.55, body_size.z * 0.38), TILE_DETAIL);
                 b.add_cube(
-                    Vec3::new(
-                        sx * (head_size.x * 0.5 + 0.04),
-                        head_center_y + head_size.y * 0.02,
-                        head_center_z + 0.05,
-                    ),
-                    Vec3::new(0.10, 0.14, 0.06),
-                    TILE_HEAD,
-                );
+                    Vec3::new(sx * (body_hx + eps), body_center_y - body_hy * 0.30, -body_hz * 0.30),
+                    Vec3::new(spot_th, body_size.y * 0.28, body_size.z * 0.22), TILE_DETAIL);
             }
-
-            // --------------------------------------------------
-            // БЕЛЫЕ ПЯТНА НА КОРПУСЕ
-            // --------------------------------------------------
-            let eps      = 0.008;
-            let spot_th  = 0.016;
-            let body_hx  = body_size.x * 0.5;
-            let body_hy  = body_size.y * 0.5;
-            let body_hz  = body_size.z * 0.5;
-
-            for sx in [-1.0_f32, 1.0] {
-                b.add_cube(
-                    Vec3::new(
-                        sx * (body_hx + eps),
-                        body_center_y + body_hy * 0.25,
-                        body_hz * 0.15,
-                    ),
-                    Vec3::new(spot_th, body_size.y * 0.55, body_size.z * 0.38),
-                    TILE_DETAIL,
-                );
-                b.add_cube(
-                    Vec3::new(
-                        sx * (body_hx + eps),
-                        body_center_y - body_hy * 0.30,
-                        -body_hz * 0.30,
-                    ),
-                    Vec3::new(spot_th, body_size.y * 0.28, body_size.z * 0.22),
-                    TILE_DETAIL,
-                );
-            }
-
             b.add_cube(
-                Vec3::new(
-                    -body_hx * 0.25,
-                    body_center_y + body_hy + eps,
-                    -body_hz * 0.20,
-                ),
-                Vec3::new(body_size.x * 0.42, spot_th, body_size.z * 0.34),
-                TILE_DETAIL,
-            );
-
+                Vec3::new(-body_hx * 0.25, body_center_y + body_hy + eps, -body_hz * 0.20),
+                Vec3::new(body_size.x * 0.42, spot_th, body_size.z * 0.34), TILE_DETAIL);
             b.add_cube(
-                Vec3::new(
-                    body_hx * 0.22,
-                    body_center_y + body_hy * 0.05,
-                    body_hz + eps,
-                ),
-                Vec3::new(body_size.x * 0.42, body_size.y * 0.45, spot_th),
-                TILE_DETAIL,
-            );
-
+                Vec3::new(body_hx * 0.22, body_center_y + body_hy * 0.05, body_hz + eps),
+                Vec3::new(body_size.x * 0.42, body_size.y * 0.45, spot_th), TILE_DETAIL);
             b.add_cube(
-                Vec3::new(
-                    -body_hx * 0.30,
-                    body_center_y - body_hy * 0.20,
-                    -body_hz - eps,
-                ),
-                Vec3::new(body_size.x * 0.30, body_size.y * 0.30, spot_th),
-                TILE_DETAIL,
-            );
+                Vec3::new(-body_hx * 0.30, body_center_y - body_hy * 0.20, -body_hz - eps),
+                Vec3::new(body_size.x * 0.30, body_size.y * 0.30, spot_th), TILE_DETAIL);
         }
-
-        // --------------------------------------------------
-        // КУРИЦА
-        // --------------------------------------------------
         MobType::Chicken => {
-            // Клюв
-            b.add_cube(
-                Vec3::new(0.0, head_center_y - head_size.y * 0.05, head_front_z - 0.04),
-                Vec3::new(0.10, 0.06, 0.08),
-                TILE_DETAIL,
-            );
+            let body_hx = body_size.x * 0.5;
+            let body_hz = body_size.z * 0.5;
+            let head_hx = head_size.x * 0.5;
 
-            // Гребень сверху
             b.add_cube(
-                Vec3::new(0.0, head_center_y + head_size.y * 0.5 + 0.05, head_center_z),
-                Vec3::new(0.10, 0.10, 0.18),
-                TILE_EXTRA,
-            );
-
-            // Серёжка снизу
+                Vec3::new(0.0, head_center_y - head_size.y * 0.10, head_front_z - 0.035),
+                Vec3::new(0.09, 0.06, 0.07), TILE_DETAIL);
             b.add_cube(
-                Vec3::new(0.0, head_center_y - head_size.y * 0.5 - 0.03, head_front_z - 0.02),
-                Vec3::new(0.06, 0.08, 0.05),
-                TILE_EXTRA,
-            );
-
-            // Глаза — только зрачок (белок сливался бы с белой головой)
+                Vec3::new(0.0, head_center_y + head_size.y * 0.5 + 0.04, head_center_z),
+                Vec3::new(0.08, 0.08, 0.14), TILE_EXTRA);
+            b.add_cube(
+                Vec3::new(0.0, head_center_y - head_size.y * 0.10 - 0.06, head_front_z - 0.02),
+                Vec3::new(0.05, 0.06, 0.04), TILE_EXTRA);
             for sx in [-1.0_f32, 1.0] {
                 b.add_cube(
-                    Vec3::new(
-                        sx * head_size.x * 0.35,
-                        head_center_y + head_size.y * 0.18,
-                        head_front_z - 0.004,
-                    ),
-                    Vec3::new(0.10, 0.10, 0.010),
-                    TILE_EYE,
-                );
-            }
-
-            // Крылышки по бокам тушки
-            for sx in [-1.0_f32, 1.0] {
+                    Vec3::new(sx * head_hx, head_center_y + head_size.y * 0.10, head_front_z - 0.006),
+                    Vec3::new(0.05, 0.07, 0.02), TILE_EYE);
                 b.add_cube(
-                    Vec3::new(
-                        sx * (body_size.x * 0.5 + 0.025),
-                        body_center_y,
-                        0.0,
-                    ),
-                    Vec3::new(0.05, body_size.y * 0.6, body_size.z * 0.7),
-                    TILE_BODY,
-                );
+                    Vec3::new(sx * (body_hx + 0.008), body_center_y, 0.0),
+                    Vec3::new(0.03, body_size.y * 0.85, body_size.z * 0.85), TILE_BODY);
             }
+            b.add_cube(
+                Vec3::new(0.0, body_center_y + body_size.y * 0.15, body_hz + 0.03),
+                Vec3::new(0.10, 0.14, 0.06), TILE_BODY);
         }
     }
 
@@ -640,67 +383,111 @@ fn build_body_mesh(mt: MobType) -> Mesh {
 fn build_leg_mesh(mt: MobType) -> Mesh {
     let mut b = MeshBuilder::new();
     let leg_size = mt.leg_size();
-    let center = Vec3::new(0.0, -leg_size.y * 0.5, 0.0);
-    b.add_cube(center, leg_size, TILE_LEG);
+    b.add_cube(Vec3::new(0.0, -leg_size.y * 0.5, 0.0), leg_size, TILE_LEG);
     b.build()
 }
 
-fn spawn_initial_mobs(
+// ============================================================
+// РЕСУРС АССЕТОВ
+// ============================================================
+
+/// Пре-созданные меши и материалы мобов. Создаётся один раз на Startup.
+#[derive(Resource)]
+struct MobAssets {
+    pig_body: Handle<Mesh>,
+    sheep_body: Handle<Mesh>,
+    cow_body: Handle<Mesh>,
+    chicken_body: Handle<Mesh>,
+    pig_leg: Handle<Mesh>,
+    sheep_leg: Handle<Mesh>,
+    cow_leg: Handle<Mesh>,
+    chicken_leg: Handle<Mesh>,
+    pig_mat: Handle<StandardMaterial>,
+    sheep_mat: Handle<StandardMaterial>,
+    cow_mat: Handle<StandardMaterial>,
+    chicken_mat: Handle<StandardMaterial>,
+}
+
+fn setup_mob_assets(
     mut commands: Commands,
-    world: Res<WorldData>,
-    player_q: Query<&Transform, With<Player>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let player_pos = player_q
-        .single()
-        .map(|t| t.translation)
-        .unwrap_or(Vec3::new(SX as f32 * 0.5, 30.0, SZ as f32 * 0.5));
-
-    info!(
-        "Spawning {} mobs (min {} blocks from player at {:?})...",
-        INITIAL_MOB_COUNT, MIN_DIST_FROM_PLAYER, player_pos
-    );
-    let t0 = std::time::Instant::now();
-
     let pig_mat     = materials.add(mob_material(images.add(make_atlas(MobType::Pig))));
     let sheep_mat   = materials.add(mob_material(images.add(make_atlas(MobType::Sheep))));
     let cow_mat     = materials.add(mob_material(images.add(make_atlas(MobType::Cow))));
     let chicken_mat = materials.add(mob_material(images.add(make_atlas(MobType::Chicken))));
 
-    let pig_body     = meshes.add(build_body_mesh(MobType::Pig));
-    let sheep_body   = meshes.add(build_body_mesh(MobType::Sheep));
-    let cow_body     = meshes.add(build_body_mesh(MobType::Cow));
-    let chicken_body = meshes.add(build_body_mesh(MobType::Chicken));
+    commands.insert_resource(MobAssets {
+        pig_body:     meshes.add(build_body_mesh(MobType::Pig)),
+        sheep_body:   meshes.add(build_body_mesh(MobType::Sheep)),
+        cow_body:     meshes.add(build_body_mesh(MobType::Cow)),
+        chicken_body: meshes.add(build_body_mesh(MobType::Chicken)),
+        pig_leg:      meshes.add(build_leg_mesh(MobType::Pig)),
+        sheep_leg:    meshes.add(build_leg_mesh(MobType::Sheep)),
+        cow_leg:      meshes.add(build_leg_mesh(MobType::Cow)),
+        chicken_leg:  meshes.add(build_leg_mesh(MobType::Chicken)),
+        pig_mat, sheep_mat, cow_mat, chicken_mat,
+    });
+    info!("MobSpawn: assets built (4 bodies, 4 legs, 4 materials)");
+}
 
-    let pig_leg     = meshes.add(build_leg_mesh(MobType::Pig));
-    let sheep_leg   = meshes.add(build_leg_mesh(MobType::Sheep));
-    let cow_leg     = meshes.add(build_leg_mesh(MobType::Cow));
-    let chicken_leg = meshes.add(build_leg_mesh(MobType::Chicken));
+// ============================================================
+// СИСТЕМА СПАВНА
+// ============================================================
 
-    let mut rng = rand::rng(); // Изменено
+fn spawn_and_maintain_mobs(
+    mut commands: Commands,
+    assets: Option<Res<MobAssets>>,
+    world: Res<WorldData>,
+    player_q: Query<&Transform, With<Player>>,
+    mob_q: Query<(), With<Mob>>,
+    mut spawned_initial: Local<usize>,
+    mut respawn_timer: Local<f32>,
+    time: Res<Time>,
+) {
+    let Some(assets) = assets else { return; };
+
+    let Ok(pt) = player_q.single() else { return; };
+    let player_pos = pt.translation;
+
+    if player_pos.y < 2.0 { return; }
+
+    let mob_count = mob_q.iter().count();
+
+    let mut to_spawn = 0usize;
+    if *spawned_initial < INITIAL_MOB_COUNT {
+        to_spawn = MOBS_PER_FRAME.min(INITIAL_MOB_COUNT - *spawned_initial);
+    } else {
+        *respawn_timer += time.delta_secs();
+        if *respawn_timer > RESPAWN_INTERVAL {
+            *respawn_timer = 0.0;
+            if mob_count < MIN_POPULATION {
+                to_spawn = 1;
+            }
+        }
+    }
+
+    if to_spawn == 0 { return; }
+
+    let mut rng = rand::rng();
     let types = [MobType::Pig, MobType::Sheep, MobType::Cow, MobType::Chicken];
 
-    let mut spawned = 0;
     let mut attempts = 0;
-    let max_attempts = INITIAL_MOB_COUNT * 100;
+    let max_attempts = to_spawn * 30;
 
-    while spawned < INITIAL_MOB_COUNT && attempts < max_attempts {
+    while to_spawn > 0 && attempts < max_attempts {
         attempts += 1;
 
-        let x = rng.random_range(4..SX - 4); // Изменено
-        let z = rng.random_range(4..SZ - 4); // Изменено
-
-        let dx = (x as f32 + 0.5) - player_pos.x;
-        let dz = (z as f32 + 0.5) - player_pos.z;
-        if dx * dx + dz * dz < MIN_DIST_FROM_PLAYER * MIN_DIST_FROM_PLAYER {
-            continue;
-        }
+        let angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let dist = rng.random_range(MIN_DIST_FROM_PLAYER..MAX_DIST_FROM_PLAYER);
+        let wx = (player_pos.x + angle.cos() * dist).floor() as i32;
+        let wz = (player_pos.z + angle.sin() * dist).floor() as i32;
 
         let mut top_y: Option<i32> = None;
         for y in (1..SY - 1).rev() {
-            if world.get(x, y, z).is_solid() {
+            if world.get(wx, y, wz).is_solid() {
                 top_y = Some(y);
                 break;
             }
@@ -712,31 +499,22 @@ fn spawn_initial_mobs(
         for dy in 0..SKY_CLEARANCE {
             let check_y = spawn_y + dy;
             if check_y >= SY { break; }
-            if world.get(x, check_y, z).is_solid() {
+            if world.get(wx, check_y, wz).is_solid() {
                 sky_clear = false;
                 break;
             }
         }
         if !sky_clear { continue; }
 
-        let mut free = true;
-        for dy in 0..3 {
-            if world.get(x, spawn_y + dy, z).is_solid() {
-                free = false;
-                break;
-            }
-        }
-        if !free { continue; }
-
-        let mob_type = types[rng.random_range(0..types.len())]; // Изменено
+        let mob_type = types[rng.random_range(0..types.len())];
         let (body_mesh, leg_mesh, material) = match mob_type {
-            MobType::Pig     => (pig_body.clone(),     pig_leg.clone(),     pig_mat.clone()),
-            MobType::Sheep   => (sheep_body.clone(),   sheep_leg.clone(),   sheep_mat.clone()),
-            MobType::Cow     => (cow_body.clone(),     cow_leg.clone(),     cow_mat.clone()),
-            MobType::Chicken => (chicken_body.clone(), chicken_leg.clone(), chicken_mat.clone()),
+            MobType::Pig     => (assets.pig_body.clone(),     assets.pig_leg.clone(),     assets.pig_mat.clone()),
+            MobType::Sheep   => (assets.sheep_body.clone(),   assets.sheep_leg.clone(),   assets.sheep_mat.clone()),
+            MobType::Cow     => (assets.cow_body.clone(),     assets.cow_leg.clone(),     assets.cow_mat.clone()),
+            MobType::Chicken => (assets.chicken_body.clone(), assets.chicken_leg.clone(), assets.chicken_mat.clone()),
         };
 
-        let yaw = rng.random_range(0.0..std::f32::consts::TAU); // Изменено
+        let yaw = rng.random_range(0.0..std::f32::consts::TAU);
 
         spawn_mob(
             &mut commands,
@@ -744,20 +522,13 @@ fn spawn_initial_mobs(
             leg_mesh,
             material,
             mob_type,
-            Vec3::new(x as f32 + 0.5, spawn_y as f32, z as f32 + 0.5),
+            Vec3::new(wx as f32 + 0.5, spawn_y as f32, wz as f32 + 0.5),
             yaw,
         );
 
-        spawned += 1;
+        *spawned_initial += 1;
+        to_spawn -= 1;
     }
-
-    info!(
-        "Spawned {} mobs in {:?} (attempts: {} / {})",
-        spawned,
-        t0.elapsed(),
-        attempts,
-        max_attempts
-    );
 }
 
 fn mob_material(atlas: Handle<Image>) -> StandardMaterial {
@@ -783,7 +554,6 @@ fn spawn_mob(
     let body_size = mob_type.body_size();
     let leg_size  = mob_type.leg_size();
 
-    // Лапы — строго по углам туловища, как в MC
     let leg_offset_x = (body_size.x - leg_size.x) * 0.5;
     let leg_offset_z = (body_size.z - leg_size.z) * 0.5;
     let leg_top_y = leg_size.y;
@@ -798,45 +568,37 @@ fn spawn_mob(
     let mut leg_pivots: Vec<Entity> = Vec::with_capacity(4);
 
     for (i, pos) in leg_positions.iter().enumerate() {
-        let leg_mesh_entity = commands
-            .spawn((
-                Mesh3d(leg_mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                Name::new(format!("LegMesh{}", i)),
-            ))
-            .id();
+        let leg_mesh_entity = commands.spawn((
+            Mesh3d(leg_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Name::new(format!("LegMesh{}", i)),
+        )).id();
 
-        let pivot_entity = commands
-            .spawn((
-                Transform::from_translation(*pos),
-                Visibility::default(),
-                Name::new(format!("LegPivot{}", i)),
-            ))
-            .id();
+        let pivot_entity = commands.spawn((
+            Transform::from_translation(*pos),
+            Visibility::default(),
+            Name::new(format!("LegPivot{}", i)),
+        )).id();
 
         commands.entity(pivot_entity).add_children(&[leg_mesh_entity]);
         leg_pivots.push(pivot_entity);
     }
 
-    let body_entity = commands
-        .spawn((
-            Mesh3d(body_mesh.clone()),
-            MeshMaterial3d(material.clone()),
-            Name::new("BodyHead"),
-        ))
-        .id();
+    let body_entity = commands.spawn((
+        Mesh3d(body_mesh.clone()),
+        MeshMaterial3d(material.clone()),
+        Name::new("BodyHead"),
+    )).id();
 
     let mut mob = Mob::new(mob_type, yaw);
     mob.legs = leg_pivots.clone();
 
-    let root_entity = commands
-        .spawn((
-            Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
-            Visibility::default(),
-            mob,
-            Name::new(format!("{:?}", mob_type)),
-        ))
-        .id();
+    let root_entity = commands.spawn((
+        Transform::from_translation(position).with_rotation(Quat::from_rotation_y(yaw)),
+        Visibility::default(),
+        mob,
+        Name::new(format!("{:?}", mob_type)),
+    )).id();
 
     let mut all_children = vec![body_entity];
     all_children.extend(leg_pivots.iter().copied());

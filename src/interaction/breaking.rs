@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
-use crate::core::state::{AppState, HOTBAR, SelectedSlot, Settings};
+use crate::core::state::{AppState, HOTBAR, SelectedSlot, Settings, SY};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
 use crate::mobs::ai::{Mob, MobState};
@@ -25,7 +25,6 @@ impl Default for SoundRng {
 }
 
 impl SoundRng {
-    /// Возвращает случайный питч в диапазоне [0.8, 1.0].
     pub fn pitch(&mut self) -> f32 {
         self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let n = (self.0 >> 16) & 0x7FFF;
@@ -163,7 +162,7 @@ fn handle_place(
     if hit.normal == IVec3::ZERO { return; }
 
     let pos = hit.prev;
-    if !WorldData::in_bounds(pos.x, pos.y, pos.z) { return; }
+    if pos.y < 0 || pos.y >= SY { return; }
     if world.get(pos.x, pos.y, pos.z).is_solid() { return; }
 
     if let Ok(player_tf) = player_q.single() {

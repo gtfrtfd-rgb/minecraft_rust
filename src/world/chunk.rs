@@ -5,9 +5,17 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::Face;
 use bevy::light::GlobalAmbientLight;
-use crate::core::state::{SX, SY, SZ, CHUNK_SIZE, Settings};
-use crate::player::controller::Player;
+use std::collections::HashMap;
 
+use crate::core::state::{
+    SY, CHUNK_SIZE, CHUNK_AREA, CHUNK_VOLUME, Settings, WorldSeed,
+};
+use crate::player::controller::Player;
+use super::generator;
+
+// ============================================================
+// БЛОКИ
+// ============================================================
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlockType {
@@ -125,42 +133,87 @@ impl BlockType {
     }
 }
 
+// ============================================================
+// ДАННЫЕ ЧАНКА
+// ============================================================
+#[derive(Clone)]
+pub struct ChunkData {
+    /// Плоский массив 16×SY×16. Индекс: y*256 + lz*16 + lx.
+    pub blocks: Vec<BlockType>,
+}
+
+impl ChunkData {
+    pub fn new() -> Self {
+        Self { blocks: vec![BlockType::Air; CHUNK_VOLUME] }
+    }
+
+    #[inline]
+    fn idx(lx: i32, y: i32, lz: i32) -> usize {
+        (y as usize) * CHUNK_AREA
+            + (lz as usize) * (CHUNK_SIZE as usize)
+            + (lx as usize)
+    }
+
+    #[inline]
+    pub fn get_local(&self, lx: i32, y: i32, lz: i32) -> BlockType {
+        if y < 0 || y >= SY { return BlockType::Air; }
+        if lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE {
+            return BlockType::Air;
+        }
+        self.blocks[Self::idx(lx, y, lz)]
+    }
+
+    #[inline]
+    pub fn set_local(&mut self, lx: i32, y: i32, lz: i32, block: BlockType) {
+        if y < 0 || y >= SY { return; }
+        if lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE { return; }
+        self.blocks[Self::idx(lx, y, lz)] = block;
+    }
+}
+
+// ============================================================
+// МИР — разреженное хранилище чанков
+// ============================================================
 #[derive(Resource)]
 pub struct WorldData {
-    pub blocks: Vec<BlockType>,
+    pub chunks: HashMap<IVec2, ChunkData>,
+    /// Правки игрока: для каждого чанка — карта «мировые координаты → блок».
+    pub edits: HashMap<IVec2, HashMap<IVec3, BlockType>>,
 }
 
 impl WorldData {
     pub fn new() -> Self {
         Self {
-            blocks: vec![BlockType::Air; (SX * SY * SZ) as usize],
+            chunks: HashMap::new(),
+            edits: HashMap::new(),
         }
-    }
-
-    #[inline]
-    fn idx(x: i32, y: i32, z: i32) -> usize {
-        (y as usize) * (SX as usize) * (SZ as usize)
-            + (z as usize) * (SX as usize)
-            + (x as usize)
-    }
-
-    #[inline]
-    pub fn in_bounds(x: i32, y: i32, z: i32) -> bool {
-        x >= 0 && x < SX && y >= 0 && y < SY && z >= 0 && z < SZ
     }
 
     #[inline]
     pub fn get(&self, x: i32, y: i32, z: i32) -> BlockType {
-        if !Self::in_bounds(x, y, z) {
+        if y < 0 || y >= SY { return BlockType::Air; }
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let Some(chunk) = self.chunks.get(&IVec2::new(cx, cz)) else {
             return BlockType::Air;
-        }
-        self.blocks[Self::idx(x, y, z)]
+        };
+        let lx = x.rem_euclid(CHUNK_SIZE);
+        let lz = z.rem_euclid(CHUNK_SIZE);
+        chunk.get_local(lx, y, lz)
     }
 
-    #[inline]
     pub fn set(&mut self, x: i32, y: i32, z: i32, block: BlockType) {
-        if Self::in_bounds(x, y, z) {
-            self.blocks[Self::idx(x, y, z)] = block;
+        if y < 0 || y >= SY { return; }
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let key = IVec2::new(cx, cz);
+
+        self.edits.entry(key).or_default().insert(IVec3::new(x, y, z), block);
+
+        if let Some(chunk) = self.chunks.get_mut(&key) {
+            let lx = x.rem_euclid(CHUNK_SIZE);
+            let lz = z.rem_euclid(CHUNK_SIZE);
+            chunk.set_local(lx, y, lz, block);
         }
     }
 
@@ -168,9 +221,23 @@ impl WorldData {
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
         if y < 0 { return true; }
         if y >= SY { return false; }
-        if x < 0 || x >= SX { return true; }
-        if z < 0 || z >= SZ { return true; }
         self.get(x, y, z).is_solid()
+    }
+
+    pub fn insert_chunk(&mut self, cx: i32, cz: i32, mut chunk: ChunkData) {
+        let key = IVec2::new(cx, cz);
+        if let Some(edits) = self.edits.get(&key) {
+            for (pos, &block) in edits {
+                let lx = pos.x.rem_euclid(CHUNK_SIZE);
+                let lz = pos.z.rem_euclid(CHUNK_SIZE);
+                chunk.set_local(lx, pos.y, lz, block);
+            }
+        }
+        self.chunks.insert(key, chunk);
+    }
+
+    pub fn has_chunk(&self, cx: i32, cz: i32) -> bool {
+        self.chunks.contains_key(&IVec2::new(cx, cz))
     }
 }
 
@@ -203,6 +270,9 @@ impl DirtyChunks {
     }
 }
 
+// ============================================================
+// АТЛАС ТЕКСТУР
+// ============================================================
 const ATLAS_TILE: u32 = 16;
 const ATLAS_COLS: u32 = 4;
 const ATLAS_ROWS: u32 = 4;
@@ -372,8 +442,10 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
     let z_start = cz * CHUNK_SIZE;
 
     for y in 0..SY {
-        for z in z_start..(z_start + CHUNK_SIZE) {
-            for x in x_start..(x_start + CHUNK_SIZE) {
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let x = x_start + lx;
+                let z = z_start + lz;
                 let block = world.get(x, y, z);
                 if !block.is_solid() { continue; }
 
@@ -417,6 +489,13 @@ pub struct ChunkMesh {
     pub coord: IVec2,
 }
 
+#[derive(Resource)]
+pub struct ChunkRenderAssets {
+    pub material: Handle<StandardMaterial>,
+    #[allow(dead_code)]
+    pub atlas: Handle<Image>,
+}
+
 pub struct ChunkPlugin;
 
 impl Plugin for ChunkPlugin {
@@ -428,17 +507,17 @@ impl Plugin for ChunkPlugin {
         })
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()
-        .add_systems(PostStartup, spawn_all_chunks)
-        .add_systems(Update, update_chunk_visibility)
-        .add_systems(PostUpdate, rebuild_dirty_chunks);
+        .add_systems(Startup, setup_chunk_render_assets)
+        .add_systems(PostUpdate, (
+            stream_chunks,
+            rebuild_dirty_chunks,
+        ).chain());
         info!("ChunkPlugin loaded.");
     }
 }
 
-fn spawn_all_chunks(
+fn setup_chunk_render_assets(
     mut commands: Commands,
-    world: Res<WorldData>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -462,7 +541,7 @@ fn spawn_all_chunks(
 
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        base_color_texture: Some(atlas_handle),
+        base_color_texture: Some(atlas_handle.clone()),
         unlit: false,
         cull_mode: Some(Face::Back),
         perceptual_roughness: 1.0,
@@ -470,34 +549,10 @@ fn spawn_all_chunks(
         ..default()
     });
 
-    info!("Building chunk meshes...");
-    let t0 = std::time::Instant::now();
-    let chunks_x = SX / CHUNK_SIZE;
-    let chunks_z = SZ / CHUNK_SIZE;
-    let mut total_vertices = 0usize;
-
-    for cx in 0..chunks_x {
-        for cz in 0..chunks_z {
-            let mesh = build_chunk_mesh(&world, cx, cz);
-            total_vertices += mesh.count_vertices();
-            let handle = meshes.add(mesh);
-
-            commands.spawn((
-                Mesh3d(handle),
-                MeshMaterial3d(material.clone()),
-                Transform::default(),
-                ChunkMesh { coord: IVec2::new(cx, cz) },
-                Name::new(format!("Chunk({}, {})", cx, cz)),
-            ));
-        }
-    }
-
-    info!(
-        "All {} chunks built in {:?}: {} vertices total",
-        chunks_x * chunks_z,
-        t0.elapsed(),
-        total_vertices
-    );
+    commands.insert_resource(ChunkRenderAssets {
+        material,
+        atlas: atlas_handle,
+    });
 
     commands.spawn((
         DirectionalLight {
@@ -507,7 +562,6 @@ fn spawn_all_chunks(
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
     ));
-
     commands.spawn((
         DirectionalLight {
             illuminance: 4000.0,
@@ -518,37 +572,120 @@ fn spawn_all_chunks(
     ));
 }
 
-/// Скрывает чанки, центр которых дальше render_distance от игрока.
-/// Вместе со встроенным фрустум-отсечением Bevy это даёт
-/// ощутимый прирост FPS на больших мирах.
-fn update_chunk_visibility(
+/// Сколько новых чанков генерировать за кадр во время движения.
+/// Больше = быстрее прогружается, но возможны микрофризы.
+const STREAM_BUDGET_PER_FRAME: usize = 6;
+
+fn stream_chunks(
     settings: Res<Settings>,
+    seed: Res<WorldSeed>,
+    mut world: ResMut<WorldData>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    assets: Option<Res<ChunkRenderAssets>>,
+    chunk_q: Query<(Entity, &ChunkMesh)>,
     player_q: Query<&Transform, With<Player>>,
-    mut chunk_q: Query<(&ChunkMesh, &mut Visibility)>,
+    mut initialized: Local<bool>,
 ) {
+    let Some(assets) = assets else { return; };
     let Ok(pt) = player_q.single() else { return; };
-    let px = pt.translation.x;
-    let pz = pt.translation.z;
-    let rd = settings.render_distance;
-    let rd_sq = rd * rd;
 
-    for (chunk, mut vis) in chunk_q.iter_mut() {
-        let cx = (chunk.coord.x * CHUNK_SIZE) as f32 + CHUNK_SIZE as f32 * 0.5;
-        let cz = (chunk.coord.y * CHUNK_SIZE) as f32 + CHUNK_SIZE as f32 * 0.5;
-        let dx = cx - px;
-        let dz = cz - pz;
-        let d_sq = dx * dx + dz * dz;
+    let pcx = (pt.translation.x.floor() as i32).div_euclid(CHUNK_SIZE);
+    let pcz = (pt.translation.z.floor() as i32).div_euclid(CHUNK_SIZE);
 
-        let new_vis = if d_sq <= rd_sq {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
+    // Радиус рендера — прямо в чанках.
+    let rd = settings.render_distance_chunks;
 
-        if *vis != new_vis {
-            *vis = new_vis;
+    // Буфер генерации: генерируем на 2 чанка дальше, чем рендерим.
+    // Благодаря этому к моменту, когда чанк попадает в зону видимости,
+    // он уже готов.
+    let load_rd = rd + 2;
+
+    let rendered: std::collections::HashSet<IVec2> =
+        chunk_q.iter().map(|(_, c)| c.coord).collect();
+
+    let first_run = !*initialized;
+    // На первом кадре — без бюджета: иначе игрок окажется над пустотой.
+    let budget = if first_run { usize::MAX } else { STREAM_BUDGET_PER_FRAME };
+
+    if budget > 0 {
+        // Приоритет по полю зрения: чанки спереди грузятся в 3 раза
+        // раньше, чем чанки сзади.
+        let fwd = pt.forward().as_vec3();
+        let fwd_x = fwd.x;
+        let fwd_z = fwd.z;
+
+        let mut to_load: Vec<(f32, IVec2)> = Vec::new();
+        for dz in -load_rd..=load_rd {
+            for dx in -load_rd..=load_rd {
+                let cx = pcx + dx;
+                let cz = pcz + dz;
+                let key = IVec2::new(cx, cz);
+                if world.chunks.contains_key(&key) { continue; }
+                let fdx = dx as f32;
+                let fdz = dz as f32;
+                let dist_sq = fdx * fdx + fdz * fdz;
+                let dot = fdx * fwd_x + fdz * fwd_z;
+                let score = if dot > 0.0 { dist_sq } else { dist_sq * 3.0 };
+                to_load.push((score, key));
+            }
+        }
+        to_load.sort_by(|a, b| {
+            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for (_, key) in to_load.into_iter().take(budget) {
+            let chunk = generator::generate_chunk(seed.0, key.x, key.y);
+            world.insert_chunk(key.x, key.y, chunk);
         }
     }
+
+    // Спавним сущности для чанков в радиусе рендера.
+    for dz in -rd..=rd {
+        for dx in -rd..=rd {
+            let cx = pcx + dx;
+            let cz = pcz + dz;
+            let key = IVec2::new(cx, cz);
+            if rendered.contains(&key) { continue; }
+            if !world.chunks.contains_key(&key) { continue; }
+
+            let mesh = build_chunk_mesh(&world, cx, cz);
+            let handle = meshes.add(mesh);
+            commands.spawn((
+                Mesh3d(handle),
+                MeshMaterial3d(assets.material.clone()),
+                Transform::default(),
+                ChunkMesh { coord: key },
+                Name::new(format!("Chunk({}, {})", cx, cz)),
+            ));
+        }
+    }
+
+    // Выгружаем сущности строго за радиуса рендера — с запасом в 0.
+    // Это значит: если игрок ушёл, чанк мгновенно исчезнет,
+    // но т.к. он и так был на самой границе видимости, глазу это
+    // незаметно.
+    for (entity, chunk) in chunk_q.iter() {
+        let dx = (chunk.coord.x - pcx).abs();
+        let dz = (chunk.coord.y - pcz).abs();
+        if dx > rd || dz > rd {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    // Выгружаем из памяти чанки, ушедшие слишком далеко (кэш).
+    let mem_rd = rd + 4;
+    let to_remove: Vec<IVec2> = world
+        .chunks
+        .keys()
+        .filter(|k| (k.x - pcx).abs() > mem_rd || (k.y - pcz).abs() > mem_rd)
+        .copied()
+        .collect();
+    for k in to_remove {
+        world.chunks.remove(&k);
+    }
+
+    *initialized = true;
 }
 
 fn rebuild_dirty_chunks(
@@ -568,8 +705,7 @@ fn rebuild_dirty_chunks(
     let mut total_verts = 0usize;
 
     for coord in coords {
-        if coord.x < 0 || coord.x >= (SX / CHUNK_SIZE) { continue; }
-        if coord.y < 0 || coord.y >= (SZ / CHUNK_SIZE) { continue; }
+        if !world.has_chunk(coord.x, coord.y) { continue; }
 
         let new_mesh = build_chunk_mesh(&world, coord.x, coord.y);
         let verts = new_mesh.count_vertices();

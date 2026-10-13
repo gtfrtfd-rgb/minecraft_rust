@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::world::chunk::{WorldData, BlockType};
 use crate::player::controller::Player;
-use crate::core::state::{WorldSeed, PlayerLook};
+use crate::core::state::{WorldSeed, PlayerLook, SY};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlayerMeta {
@@ -20,18 +20,27 @@ pub struct PlayerMeta {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct BlockEdit {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub block: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SaveMeta {
     pub format_version: u32,
     pub game_version: String,
     pub seed: u32,
     pub saved_at: u64,
     pub player: PlayerMeta,
+    /// Все правки игрока: сломанные и поставленные блоки.
+    pub edits: Vec<BlockEdit>,
 }
 
 #[derive(Resource, Default)]
 pub struct LoadedSave {
     pub meta: Option<SaveMeta>,
-    pub rle_bytes: Option<Vec<u8>>,
 }
 
 fn saves_dir() -> PathBuf {
@@ -44,47 +53,6 @@ fn saves_dir() -> PathBuf {
 }
 
 fn meta_path() -> PathBuf { saves_dir().join("meta.json") }
-fn world_path() -> PathBuf { saves_dir().join("world.bin") }
-
-fn rle_encode(blocks: &[BlockType]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(blocks.len() / 8);
-    let mut i = 0;
-    let n = blocks.len();
-    while i < n {
-        let v = blocks[i].to_u8();
-        let mut run = 1usize;
-        while i + run < n
-            && blocks[i + run].to_u8() == v
-            && run < 65535
-        {
-            run += 1;
-        }
-        out.push(v);
-        out.push((run & 0xFF) as u8);
-        out.push(((run >> 8) & 0xFF) as u8);
-        i += run;
-    }
-    out
-}
-
-pub fn rle_decode(data: &[u8], total_len: usize) -> Vec<BlockType> {
-    let mut out = Vec::with_capacity(total_len);
-    let mut i = 0;
-    while i + 2 < data.len() && out.len() < total_len {
-        let v = data[i];
-        let run = (data[i + 1] as usize) | ((data[i + 2] as usize) << 8);
-        let b = BlockType::from_u8(v);
-        for _ in 0..run {
-            if out.len() >= total_len { break; }
-            out.push(b);
-        }
-        i += 3;
-    }
-    while out.len() < total_len {
-        out.push(BlockType::Air);
-    }
-    out
-}
 
 pub struct PersistencePlugin;
 
@@ -92,6 +60,7 @@ impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoadedSave>()
            .add_systems(PreStartup, load_save_data)
+           .add_systems(PostStartup, apply_loaded_edits)
            .add_systems(Update, auto_save)
            .add_systems(Last, save_on_exit);
         info!("PersistencePlugin loaded.");
@@ -100,10 +69,9 @@ impl Plugin for PersistencePlugin {
 
 fn load_save_data(mut loaded: ResMut<LoadedSave>) {
     let mpath = meta_path();
-    let wpath = world_path();
 
-    if !mpath.exists() || !wpath.exists() {
-        info!("No save files found — new world will be generated");
+    if !mpath.exists() {
+        info!("No save file found — new world will be generated");
         return;
     }
 
@@ -115,18 +83,42 @@ fn load_save_data(mut loaded: ResMut<LoadedSave>) {
         Ok(m) => m,
         Err(e) => { warn!("parse meta.json: {}", e); return; }
     };
-    let bytes = match fs::read(&wpath) {
-        Ok(b) => b,
-        Err(e) => { warn!("read world.bin: {}", e); return; }
-    };
 
     info!(
-        "Loaded save: seed={}, {} RLE bytes, game_version={}, saved_at={}",
-        meta.seed, bytes.len(), meta.game_version, meta.saved_at
+        "Loaded save: seed={}, edits={}, game_version={}",
+        meta.seed, meta.edits.len(), meta.game_version
     );
 
     loaded.meta = Some(meta);
-    loaded.rle_bytes = Some(bytes);
+}
+
+/// Применяет загруженные правки в WorldData.edits.
+/// Сами чанки будут сгенерированы лениво, и при генерации эти
+/// правки наложатся автоматически (см. `WorldData::insert_chunk`).
+fn apply_loaded_edits(
+    loaded: Res<LoadedSave>,
+    mut world: ResMut<WorldData>,
+    mut seed: ResMut<WorldSeed>,
+) {
+    let Some(meta) = &loaded.meta else { return; };
+
+    seed.0 = meta.seed;
+
+    use crate::core::state::CHUNK_SIZE;
+
+    for edit in &meta.edits {
+        if edit.y < 0 || edit.y >= SY { continue; }
+        let cx = edit.x.div_euclid(CHUNK_SIZE);
+        let cz = edit.z.div_euclid(CHUNK_SIZE);
+        let key = IVec2::new(cx, cz);
+        world
+            .edits
+            .entry(key)
+            .or_default()
+            .insert(IVec3::new(edit.x, edit.y, edit.z), BlockType::from_u8(edit.block));
+    }
+
+    info!("Applied {} block edits from save", meta.edits.len());
 }
 
 fn auto_save(
@@ -176,13 +168,17 @@ fn save_game(
         return;
     }
 
-    let t0 = std::time::Instant::now();
-    let rle = rle_encode(&world.blocks);
-    let rle_time = t0.elapsed();
-
-    if let Err(e) = fs::write(world_path(), &rle) {
-        error!("Cannot write world.bin: {}", e);
-        return;
+    // Собираем все правки из всех чанков в плоский список.
+    let mut edits: Vec<BlockEdit> = Vec::new();
+    for chunk_edits in world.edits.values() {
+        for (&pos, &block) in chunk_edits {
+            edits.push(BlockEdit {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                block: block.to_u8(),
+            });
+        }
     }
 
     let now = SystemTime::now()
@@ -191,7 +187,7 @@ fn save_game(
         .unwrap_or(0);
 
     let meta = SaveMeta {
-        format_version: 1,
+        format_version: 2, // поменяли формат — теперь только правки
         game_version: env!("CARGO_PKG_VERSION").into(),
         seed: seed.0,
         saved_at: now,
@@ -203,6 +199,7 @@ fn save_game(
             pitch: look.pitch,
             fly: player.fly,
         },
+        edits,
     };
 
     match serde_json::to_string_pretty(&meta) {
@@ -210,12 +207,7 @@ fn save_game(
             if let Err(e) = fs::write(meta_path(), s) {
                 error!("Cannot write meta.json: {}", e);
             } else {
-                info!(
-                    "Saved: {} blocks → {} RLE bytes in {:?}",
-                    world.blocks.len(),
-                    rle.len(),
-                    rle_time
-                );
+                info!("Saved: {} block edits", meta.edits.len());
             }
         }
         Err(e) => error!("Cannot serialize meta: {}", e),

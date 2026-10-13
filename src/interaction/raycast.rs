@@ -112,13 +112,7 @@ fn draw_target_highlight(
     cam_q: Query<&Transform, With<PlayerCamera>>,
 ) {
     let Some(hit) = target.hit else { return; };
-
-    if !WorldData::in_bounds(hit.block.x, hit.block.y, hit.block.z) {
-        return;
-    }
-    if hit.block.y <= 0 {
-        return;
-    }
+    if hit.block.y <= 0 { return; }
 
     let Ok(cam_tf) = cam_q.single() else { return; };
 
@@ -130,15 +124,12 @@ fn draw_target_highlight(
         return;
     }
 
-    // Обычно — чёрный контур. Если по этому блоку идёт ломание,
-    // плавно перекрашиваем в тёплый оранжево-красный по прогрессу.
     let t = if progress.target == Some(hit.block) {
         progress.progress.clamp(0.0, 1.0)
     } else {
         0.0
     };
 
-    // t=0.0 → чёрный, t=0.5 → оранжевый, t=1.0 → насыщенный красный.
     let color = if t <= 0.0 {
         Color::BLACK
     } else if t < 0.5 {
@@ -185,7 +176,7 @@ pub fn raycast(world: &WorldData, origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     let mut normal = IVec3::ZERO;
 
     for _ in 0..256 {
-        if WorldData::in_bounds(x, y, z) && world.get(x, y, z).is_solid() {
+        if world.is_solid(x, y, z) {
             return Some(TargetHit {
                 block: IVec3::new(x, y, z),
                 normal,

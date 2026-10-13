@@ -102,7 +102,7 @@ macro_rules! settings_row {
     ($parent:expr, $field:expr, $label:expr) => {
         $parent
             .spawn(Node {
-                width: Val::Px(560.0),
+                width: Val::Px(600.0),
                 height: Val::Px(52.0),
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
@@ -123,7 +123,7 @@ macro_rules! settings_row {
                     },
                 ));
 
-                // Минус
+                // Минус (ASCII-дефис — default font Bevy не имеет U+2212)
                 row.spawn((
                     Button,
                     Interaction::default(),
@@ -158,7 +158,7 @@ macro_rules! settings_row {
                     },
                     TextColor(Color::srgb(0.85, 0.95, 0.65)),
                     Node {
-                        width: Val::Px(140.0),
+                        width: Val::Px(110.0),
                         ..default()
                     },
                     SettingValueText($field),
@@ -228,7 +228,7 @@ fn spawn_settings_menu(mut commands: Commands) {
 
             settings_row!(root, SettingsField::MasterVolume,     "Master Volume");
             settings_row!(root, SettingsField::MouseSensitivity, "Mouse Sensitivity");
-            settings_row!(root, SettingsField::RenderDistance,   "Render Distance");
+            settings_row!(root, SettingsField::RenderDistance,   "Render Distance (chunks)");
 
             root.spawn(Node {
                 height: Val::Px(30.0),
@@ -318,9 +318,10 @@ fn apply_delta(settings: &mut Settings, field: SettingsField, dir: f32) {
                 (settings.mouse_sensitivity + step).clamp(0.0005, 0.0060);
         }
         SettingsField::RenderDistance => {
-            let step = 16.0 * dir;
-            settings.render_distance =
-                (settings.render_distance + step).clamp(32.0, 256.0);
+            // Шаг 1 чанк. Диапазон 4..=32.
+            let step = dir.signum() as i32;
+            settings.render_distance_chunks =
+                (settings.render_distance_chunks + step).clamp(4, 32);
         }
     }
 }
@@ -341,7 +342,8 @@ fn update_setting_texts(
                 format!("{:.4}", settings.mouse_sensitivity)
             }
             SettingsField::RenderDistance => {
-                format!("{:.0}", settings.render_distance)
+                // Только чанки — без перевода в блоки.
+                format!("{}", settings.render_distance_chunks)
             }
         };
     }
