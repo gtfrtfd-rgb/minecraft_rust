@@ -28,6 +28,7 @@ impl Plugin for HudPlugin {
 }
 
 fn setup_hud(mut commands: Commands) {
+    // Корневой узел — крестик в центре экрана.
     commands
         .spawn((
             Node {
@@ -40,6 +41,7 @@ fn setup_hud(mut commands: Commands) {
             Name::new("HudRoot"),
         ))
         .with_children(|parent| {
+            // Вертикальная линия прицела
             parent.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -57,6 +59,7 @@ fn setup_hud(mut commands: Commands) {
                 },
                 BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
             ));
+            // Горизонтальная линия прицела
             parent.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -76,46 +79,42 @@ fn setup_hud(mut commands: Commands) {
             ));
         });
 
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            top: Val::Px(10.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(2.0),
-            ..default()
-        },
-        HudRoot,
-        Name::new("HudTopLeft"),
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            Text::new("XYZ: 0.0 / 0.0 / 0.0"),
-            TextFont {
-                font_size: FontSize::Px(20.0), // Изменено
+    // Левый верхний угол — координаты и FPS.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(10.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
                 ..default()
             },
-            TextColor(Color::WHITE),
-            CoordsText,
-        ));
-        parent.spawn((
-            Text::new("FPS: --"),
-            TextFont {
-                font_size: FontSize::Px(18.0), // Изменено
-                ..default()
-            },
-            TextColor(Color::srgb(0.85, 0.95, 0.65)),
-            FpsText,
-        ));
-        parent.spawn((
-            TextFont {
-                font_size: FontSize::Px(14.0), // Изменено
-                ..default()
-            },
-            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
-        ));
-    });
+            HudRoot,
+            Name::new("HudTopLeft"),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("XYZ: 0.0 / 0.0 / 0.0"),
+                TextFont {
+                    font_size: FontSize::Px(20.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                CoordsText,
+            ));
+            parent.spawn((
+                Text::new("FPS: --"),
+                TextFont {
+                    font_size: FontSize::Px(18.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.85, 0.95, 0.65)),
+                FpsText,
+            ));
+        });
 
+    // Правый верхний угол — подсказки по управлению.
     commands.spawn((
         Text::new(
             "WASD / Arrows - move\n\
@@ -124,7 +123,7 @@ fn setup_hud(mut commands: Commands) {
              1-9 / MouseWheel - slot   Esc - pause",
         ),
         TextFont {
-            font_size: FontSize::Px(14.0), // Изменено
+            font_size: FontSize::Px(14.0),
             ..default()
         },
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
@@ -134,7 +133,7 @@ fn setup_hud(mut commands: Commands) {
             top: Val::Px(10.0),
             ..default()
         },
-        TextLayout::justify(Justify::Right), // Изменено
+        TextLayout::justify(Justify::Right),
         HudRoot,
         Name::new("HudHelp"),
     ));

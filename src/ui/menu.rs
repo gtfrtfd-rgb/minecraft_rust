@@ -9,7 +9,6 @@ struct MainMenuRoot;
 #[derive(Component)]
 struct PauseMenuRoot;
 
-/// Публичный для использования из settings.rs (кнопка BACK).
 #[derive(Component, Clone, Copy)]
 pub enum MenuAction {
     Play,
@@ -40,8 +39,10 @@ impl Plugin for MenuPlugin {
     }
 }
 
+/// Спавнит кнопку. Четвёртый аргумент — отступы (margin),
+/// с помощью которых раньше делали spacer-ноды.
 macro_rules! menu_button {
-    ($parent:expr, $action:expr, $label:expr) => {
+    ($parent:expr, $action:expr, $label:expr, $margin:expr) => {
         $parent
             .spawn((
                 Button,
@@ -52,6 +53,7 @@ macro_rules! menu_button {
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
+                    margin: $margin,
                     ..default()
                 },
                 BackgroundColor(BTN_NORMAL),
@@ -74,6 +76,7 @@ macro_rules! menu_button {
 fn spawn_menus(mut commands: Commands) {
     info!("Spawning menus");
 
+    // -------- Главное меню --------
     commands
         .spawn((
             Node {
@@ -101,16 +104,14 @@ fn spawn_menus(mut commands: Commands) {
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
             ));
 
-            root.spawn(Node {
-                height: Val::Px(50.0),
-                ..default()
-            });
-
-            menu_button!(root, MenuAction::Play,       "PLAY");
-            menu_button!(root, MenuAction::Settings,   "SETTINGS");
-            menu_button!(root, MenuAction::ExitGame,   "EXIT");
+            // PLAY отделён от заголовка 50 px margin'ом — раньше
+            // для этого был пустой spacer-нод.
+            menu_button!(root, MenuAction::Play,     "PLAY",     UiRect::top(Val::Px(50.0)));
+            menu_button!(root, MenuAction::Settings, "SETTINGS", UiRect::ZERO);
+            menu_button!(root, MenuAction::ExitGame, "EXIT",     UiRect::ZERO);
         });
 
+    // -------- Меню паузы --------
     commands
         .spawn((
             Node {
@@ -138,20 +139,11 @@ fn spawn_menus(mut commands: Commands) {
                 TextColor(Color::WHITE),
             ));
 
-            root.spawn(Node {
-                height: Val::Px(40.0),
-                ..default()
-            });
+            menu_button!(root, MenuAction::Resume,     "RESUME",       UiRect::top(Val::Px(40.0)));
+            menu_button!(root, MenuAction::ExitToMenu, "EXIT TO MENU", UiRect::ZERO);
+            menu_button!(root, MenuAction::ExitGame,   "QUIT GAME",    UiRect::ZERO);
 
-            menu_button!(root, MenuAction::Resume,     "RESUME");
-            menu_button!(root, MenuAction::ExitToMenu, "EXIT TO MENU");
-            menu_button!(root, MenuAction::ExitGame,   "QUIT GAME");
-
-            root.spawn(Node {
-                height: Val::Px(30.0),
-                ..default()
-            });
-
+            // Подсказка снизу — margin вместо третьего spacer'а.
             root.spawn((
                 Text::new("Press ESC to resume"),
                 TextFont {
@@ -159,6 +151,10 @@ fn spawn_menus(mut commands: Commands) {
                     ..default()
                 },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
+                Node {
+                    margin: UiRect::top(Val::Px(30.0)),
+                    ..default()
+                },
             ));
         });
 }
