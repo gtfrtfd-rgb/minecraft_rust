@@ -14,10 +14,6 @@ pub const CHUNK_AREA: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
 pub const CHUNK_VOLUME: usize = CHUNK_AREA * SY as usize;
 
 /// Кросс-платформенная папка данных приложения.
-/// Windows: `%APPDATA%\minecraft_rust`
-/// macOS:   `~/Library/Application Support/minecraft_rust`
-/// Linux:   `$XDG_DATA_HOME/minecraft_rust` или `~/.local/share/minecraft_rust`
-/// Fallback: папка рядом с `.exe`.
 pub fn data_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
         if let Ok(appdata) = std::env::var("APPDATA") {
@@ -56,6 +52,13 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Папка миров.
+pub fn worlds_dir() -> PathBuf {
+    let mut p = data_dir();
+    p.push("worlds");
+    p
+}
+
 // ============================================================
 // СОСТОЯНИЯ ИГРЫ
 // ============================================================
@@ -63,6 +66,7 @@ pub fn data_dir() -> PathBuf {
 pub enum AppState {
     #[default]
     Menu,
+    Worlds,
     Settings,
     Keybinds,
     InGame,
@@ -93,7 +97,7 @@ impl Default for MaxResolutionIndex {
 }
 
 // ============================================================
-// ДЕЙСТВИЯ, КОТОРЫЕ МОЖНО ПЕРЕНАЗНАЧИТЬ
+// ДЕЙСТВИЯ ДЛЯ ПЕРЕНАЗНАЧЕНИЯ
 // ============================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BindAction {
@@ -133,7 +137,6 @@ impl BindAction {
     }
 }
 
-/// Преобразует строку в KeyCode.
 pub fn parse_key(s: &str) -> KeyCode {
     use KeyCode::*;
     match s {
@@ -162,10 +165,37 @@ pub fn parse_key(s: &str) -> KeyCode {
     }
 }
 
-/// Сериализует KeyCode в строку.
 pub fn key_to_string(k: KeyCode) -> String {
     format!("{:?}", k)
 }
+
+// ============================================================
+// ИНФОРМАЦИЯ О МИРЕ
+// ============================================================
+#[derive(Clone)]
+pub struct WorldInfo {
+    pub name: String,
+    pub path: PathBuf,
+    pub seed: u32,
+    pub saved_at: u64,
+    pub edits: usize,
+}
+
+/// Список миров, отсканированных из `worlds/`.
+#[derive(Resource, Default)]
+pub struct WorldsList(pub Vec<WorldInfo>);
+
+/// Индекс выбранного мира в списке.
+#[derive(Resource, Default)]
+pub struct SelectedWorldIdx(pub usize);
+
+/// Мир, который нужно загрузить при следующем входе в InGame.
+#[derive(Resource, Default)]
+pub struct PendingLoadWorld(pub Option<PathBuf>);
+
+/// Путь активного (загруженного) мира. Сохранения идут сюда.
+#[derive(Resource, Default)]
+pub struct ActiveWorld(pub Option<PathBuf>);
 
 // ============================================================
 // НАСТРОЙКИ
@@ -250,7 +280,6 @@ impl Settings {
     }
 }
 
-/// Кэш KeyCode — чтобы не парсить строки каждый кадр.
 #[derive(Resource)]
 pub struct KeyBinds {
     pub forward: KeyCode,
@@ -278,7 +307,6 @@ impl KeyBinds {
     }
 }
 
-/// Действие, для которого сейчас ждём нажатия клавиши.
 #[derive(Resource, Default)]
 pub struct RebindingState {
     pub action: Option<BindAction>,
@@ -318,6 +346,10 @@ impl Plugin for GameStatePlugin {
             .init_resource::<Settings>()
             .init_resource::<MaxResolutionIndex>()
             .init_resource::<RebindingState>()
+            .init_resource::<WorldsList>()
+            .init_resource::<SelectedWorldIdx>()
+            .init_resource::<PendingLoadWorld>()
+            .init_resource::<ActiveWorld>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
             .add_systems(Startup, init_keybinds)
@@ -379,11 +411,6 @@ fn compute_max_resolution(
 
     if settings.resolution_idx > max_idx {
         settings.resolution_idx = max_idx;
-        info!(
-            "Resolution clamped to {}x{} (screen is {}x{})",
-            RESOLUTION_OPTIONS[max_idx].0, RESOLUTION_OPTIONS[max_idx].1,
-            max_w, max_h
-        );
     }
 
     commands.insert_resource(MaxResolutionIndex(max_idx));

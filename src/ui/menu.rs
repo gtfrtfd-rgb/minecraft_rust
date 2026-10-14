@@ -11,7 +11,7 @@ struct PauseMenuRoot;
 
 #[derive(Component, Clone, Copy)]
 pub enum MenuAction {
-    Play,
+    Singleplayer,
     Settings,
     OpenKeybinds,
     ExitToSettings,
@@ -48,7 +48,7 @@ macro_rules! menu_button {
                 Button,
                 Interaction::default(),
                 Node {
-                    width: Val::Px(340.0),
+                    width: Val::Px(360.0),
                     height: Val::Px(64.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
@@ -73,7 +73,6 @@ macro_rules! menu_button {
 fn spawn_menus(mut commands: Commands) {
     info!("Spawning menus");
 
-    // -------- Главное меню --------
     commands
         .spawn((
             Node {
@@ -98,12 +97,11 @@ fn spawn_menus(mut commands: Commands) {
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
             ));
 
-            menu_button!(root, MenuAction::Play,     "PLAY",     UiRect::top(Val::Px(50.0)));
-            menu_button!(root, MenuAction::Settings, "SETTINGS", UiRect::ZERO);
-            menu_button!(root, MenuAction::ExitGame, "EXIT",     UiRect::ZERO);
+            menu_button!(root, MenuAction::Singleplayer, "SINGLEPLAYER", UiRect::top(Val::Px(50.0)));
+            menu_button!(root, MenuAction::Settings,     "SETTINGS",     UiRect::ZERO);
+            menu_button!(root, MenuAction::ExitGame,     "EXIT",         UiRect::ZERO);
         });
 
-    // -------- Меню паузы --------
     commands
         .spawn((
             Node {
@@ -173,7 +171,10 @@ fn handle_menu_buttons(
     for (interaction, action, mut bg, mut border) in q.iter_mut() {
         match *interaction {
             Interaction::Pressed => match action {
-                MenuAction::Play | MenuAction::Resume => {
+                MenuAction::Singleplayer => {
+                    next_state.set(AppState::Worlds);
+                }
+                MenuAction::Resume => {
                     next_state.set(AppState::InGame);
                 }
                 MenuAction::Settings => {
@@ -223,13 +224,9 @@ fn handle_escape_key(
             next_state.set(AppState::Menu);
         }
         AppState::Keybinds => {
-            // Обрабатывается в keybinds.rs — здесь не вмешиваемся,
-            // если ждём переназначение.
-            if rebinding.action.is_none() {
-                // ничего — keybinds сам обработает
-            }
+            let _ = rebinding;
         }
-        AppState::Menu => {}
+        AppState::Worlds | AppState::Menu => {}
     }
 }
 
@@ -243,6 +240,7 @@ fn update_cursor_for_state(
         AppState::InGame   => (false, CursorGrabMode::Confined),
         AppState::Paused   => (true,  CursorGrabMode::None),
         AppState::Menu     => (true,  CursorGrabMode::None),
+        AppState::Worlds   => (true,  CursorGrabMode::None),
         AppState::Settings => (true,  CursorGrabMode::None),
         AppState::Keybinds => (true,  CursorGrabMode::None),
     };

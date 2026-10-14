@@ -8,7 +8,7 @@ use bevy::light::GlobalAmbientLight;
 use std::collections::HashMap;
 
 use crate::core::state::{
-    SY, CHUNK_SIZE, CHUNK_AREA, CHUNK_VOLUME, Settings, WorldSeed,
+    SY, CHUNK_SIZE, CHUNK_AREA, CHUNK_VOLUME, Settings, WorldSeed, AppState,
 };
 use crate::player::controller::Player;
 use super::generator;
@@ -508,13 +508,12 @@ impl Plugin for ChunkPlugin {
         .init_resource::<DirtyChunks>()
         .add_systems(Startup, setup_chunk_render_assets)
         .add_systems(PostUpdate, (
-            stream_chunks,
-            rebuild_dirty_chunks,
+            stream_chunks.run_if(in_state(AppState::InGame)),
+            rebuild_dirty_chunks.run_if(in_state(AppState::InGame)),
         ).chain());
         info!("ChunkPlugin loaded.");
     }
 }
-
 fn setup_chunk_render_assets(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,

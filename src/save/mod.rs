@@ -1,4 +1,5 @@
 pub mod persistence;
+pub mod worlds;
 
 use bevy::prelude::*;
 

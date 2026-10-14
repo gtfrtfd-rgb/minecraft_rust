@@ -1,8 +1,9 @@
 pub mod hotbar;
 pub mod hud;
+pub mod keybinds;
 pub mod menu;
 pub mod settings;
-pub mod keybinds;
+pub mod worlds;
 
 use bevy::prelude::*;
 
@@ -16,6 +17,7 @@ impl Plugin for UiPlugin {
             menu::MenuPlugin,
             settings::SettingsPlugin,
             keybinds::KeybindsPlugin,
+            worlds::WorldsPlugin,
         ));
         info!("UiPlugin loaded.");
     }

@@ -5,9 +5,12 @@ use std::path::PathBuf;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::world::chunk::{WorldData, BlockType};
+use crate::world::chunk::{WorldData, BlockType, ChunkMesh, DirtyChunks};
 use crate::player::controller::Player;
-use crate::core::state::{WorldSeed, PlayerLook, SY, CHUNK_SIZE, data_dir};
+use crate::core::state::{
+    WorldSeed, PlayerLook, SY, CHUNK_SIZE, AppState,
+    data_dir, worlds_dir, PendingLoadWorld, ActiveWorld,
+};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlayerMeta {
@@ -31,6 +34,9 @@ pub struct BlockEdit {
 pub struct SaveMeta {
     pub format_version: u32,
     pub game_version: String,
+    /// Имя мира. Опционально — старые сейвы могут его не иметь.
+    #[serde(default)]
+    pub world_name: String,
     pub seed: u32,
     pub saved_at: u64,
     pub player: PlayerMeta,
@@ -42,143 +48,167 @@ pub struct LoadedSave {
     pub meta: Option<SaveMeta>,
 }
 
-/// Папка сохранений в системной папке данных приложения.
-fn saves_dir() -> PathBuf {
-    let mut p = data_dir();
-    p.push("saves");
-    p
-}
-
-fn meta_path() -> PathBuf { saves_dir().join("meta.json") }
-
-/// Путь рядом с exe — для миграции старых сейвов.
-fn legacy_saves_dir() -> PathBuf {
-    let mut p = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
-    p.push("saves");
-    p
-}
-
-/// Если новой папки ещё нет, а старая (рядом с exe) существует —
-/// копируем содержимое. Так пользователь не теряет мир после
-/// перехода на новое расположение.
-fn migrate_legacy_save_if_needed() {
-    let new_dir = saves_dir();
-    let old_dir = legacy_saves_dir();
-
-    if new_dir == old_dir { return; }
-    if new_dir.exists() { return; }
-    if !old_dir.exists() { return; }
-
-    if let Err(e) = fs::create_dir_all(&new_dir) {
-        warn!("Cannot create {:?} for migration: {}", new_dir, e);
-        return;
-    }
-
-    let mut copied = 0;
-    if let Ok(entries) = fs::read_dir(&old_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() { continue; }
-            if let Some(name) = path.file_name() {
-                let dst = new_dir.join(name);
-                if fs::copy(&path, &dst).is_ok() {
-                    copied += 1;
-                }
-            }
-        }
-    }
-
-    if copied > 0 {
-        info!(
-            "Migrated {} save files from {:?} to {:?}",
-            copied, old_dir, new_dir
-        );
-    }
-}
-
 pub struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoadedSave>()
-           .add_systems(PreStartup, (migrate_legacy_save_if_needed, load_save_data).chain())
-           .add_systems(PostStartup, apply_loaded_edits)
-           .add_systems(Update, auto_save)
-           .add_systems(Last, save_on_exit);
+            .add_systems(PreStartup, migrate_legacy_save_if_needed)
+            .add_systems(OnEnter(AppState::InGame), on_enter_ingame)
+            .add_systems(OnExit(AppState::InGame), on_exit_ingame)
+            .add_systems(
+                Update,
+                auto_save.run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(Last, save_on_app_exit);
         info!("PersistencePlugin loaded.");
     }
 }
 
-fn load_save_data(mut loaded: ResMut<LoadedSave>) {
-    let mpath = meta_path();
+/// Мигрирует старый одиночный сейв (рядом с exe или в data_dir/saves)
+/// в worlds/Default.json.
+fn migrate_legacy_save_if_needed() {
+    let worlds = worlds_dir();
 
-    if !mpath.exists() {
-        info!("No save file found — new world will be generated");
-        info!("Saves will be stored in {:?}", saves_dir());
-        return;
+    // Если worlds/ уже содержит хоть один файл — миграция не нужна.
+    if worlds.exists() {
+        if let Ok(mut it) = fs::read_dir(&worlds) {
+            if it.next().is_some() { return; }
+        }
     }
 
-    let meta_str = match fs::read_to_string(&mpath) {
-        Ok(s) => s,
-        Err(e) => { warn!("read meta.json: {}", e); return; }
-    };
-    let meta: SaveMeta = match serde_json::from_str(&meta_str) {
-        Ok(m) => m,
-        Err(e) => { warn!("parse meta.json: {}", e); return; }
-    };
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
 
-    info!(
-        "Loaded save: seed={}, edits={}, game_version={}",
-        meta.seed, meta.edits.len(), meta.game_version
-    );
+    let candidates = [
+        data_dir().join("saves").join("meta.json"),
+        exe_dir.join("saves").join("meta.json"),
+    ];
 
-    loaded.meta = Some(meta);
+    for legacy in &candidates {
+        if !legacy.exists() { continue; }
+        let Ok(s) = fs::read_to_string(legacy) else { continue; };
+        let Ok(mut meta) = serde_json::from_str::<SaveMeta>(&s) else { continue; };
+
+        if meta.world_name.is_empty() {
+            meta.world_name = "Default".into();
+        }
+
+        if fs::create_dir_all(&worlds).is_err() { return; }
+        let target = worlds.join("Default.json");
+        let Ok(out) = serde_json::to_string_pretty(&meta) else { return; };
+
+        if fs::write(&target, out).is_ok() {
+            info!("Migrated legacy save {:?} -> {:?}", legacy, target);
+        }
+        return;
+    }
 }
 
-fn apply_loaded_edits(
-    loaded: Res<LoadedSave>,
+/// Загружает мир, когда игрок заходит в InGame.
+fn on_enter_ingame(
+    mut pending: ResMut<PendingLoadWorld>,
+    mut loaded: ResMut<LoadedSave>,
+    mut active: ResMut<ActiveWorld>,
     mut world: ResMut<WorldData>,
+    mut dirty: ResMut<DirtyChunks>,
     mut seed: ResMut<WorldSeed>,
+    mut look: ResMut<PlayerLook>,
+    mut player_q: Query<(&mut Transform, &mut Player)>,
+    chunk_q: Query<Entity, With<ChunkMesh>>,
+    mut commands: Commands,
 ) {
-    let Some(meta) = &loaded.meta else { return; };
+    let Some(path) = pending.0.take() else { return; };
 
+    // Чистим старый мир.
+    for entity in chunk_q.iter() {
+        commands.entity(entity).despawn();
+    }
+    world.chunks.clear();
+    world.edits.clear();
+    dirty.0.clear();
+
+    // Читаем meta.
+    let Ok(s) = fs::read_to_string(&path) else {
+        warn!("Cannot read world file {:?}", path);
+        return;
+    };
+    let meta = match serde_json::from_str::<SaveMeta>(&s) {
+        Ok(m) => m,
+        Err(e) => { warn!("Parse world file error: {}", e); return; }
+    };
+
+    // Сид.
     seed.0 = meta.seed;
 
+    // Правки.
     for edit in &meta.edits {
         if edit.y < 0 || edit.y >= SY { continue; }
         let cx = edit.x.div_euclid(CHUNK_SIZE);
         let cz = edit.z.div_euclid(CHUNK_SIZE);
         let key = IVec2::new(cx, cz);
-        world
-            .edits
-            .entry(key)
-            .or_default()
+        world.edits.entry(key).or_default()
             .insert(IVec3::new(edit.x, edit.y, edit.z), BlockType::from_u8(edit.block));
     }
 
-    info!("Applied {} block edits from save", meta.edits.len());
+    // Игрок.
+    if let Ok((mut tf, mut player)) = player_q.single_mut() {
+        tf.translation = Vec3::new(meta.player.x, meta.player.y, meta.player.z);
+        player.fly = meta.player.fly;
+        player.velocity = Vec3::ZERO;
+    }
+    look.yaw = meta.player.yaw;
+    look.pitch = meta.player.pitch;
+
+    info!(
+        "Loaded world '{}': seed={}, edits={}",
+        if meta.world_name.is_empty() { "<unnamed>" } else { &meta.world_name },
+        meta.seed,
+        meta.edits.len()
+    );
+
+    active.0 = Some(path);
+    loaded.meta = Some(meta);
 }
 
-fn auto_save(
-    time: Res<Time>,
-    mut timer: Local<f32>,
+/// Сохраняет мир при выходе из игры (пауза, меню, app exit).
+fn on_exit_ingame(
+    active: Res<ActiveWorld>,
     world: Res<WorldData>,
     seed: Res<WorldSeed>,
     look: Res<PlayerLook>,
     player_q: Query<(&Transform, &Player)>,
 ) {
+    let Some(path) = active.0.clone() else { return; };
+    if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
+        warn!("Save on exit failed: {}", e);
+    }
+}
+
+fn auto_save(
+    time: Res<Time>,
+    mut timer: Local<f32>,
+    active: Res<ActiveWorld>,
+    world: Res<WorldData>,
+    seed: Res<WorldSeed>,
+    look: Res<PlayerLook>,
+    player_q: Query<(&Transform, &Player)>,
+) {
+    let Some(path) = active.0.clone() else { return; };
     *timer += time.delta_secs();
     if *timer < 30.0 { return; }
     *timer = 0.0;
 
-    save_game(&world, &seed, &look, &player_q);
+    if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
+        warn!("Autosave failed: {}", e);
+    }
 }
 
-fn save_on_exit(
+fn save_on_app_exit(
     mut exit: MessageReader<AppExit>,
+    active: Res<ActiveWorld>,
     world: Res<WorldData>,
     seed: Res<WorldSeed>,
     look: Res<PlayerLook>,
@@ -188,26 +218,29 @@ fn save_on_exit(
     for _ in exit.read() { any = true; }
     if !any { return; }
 
+    let Some(path) = active.0.clone() else { return; };
     info!("Saving world before exit...");
-    save_game(&world, &seed, &look, &player_q);
+    if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
+        warn!("Save on exit failed: {}", e);
+    }
 }
 
-fn save_game(
+fn save_game_to(
+    path: PathBuf,
     world: &WorldData,
     seed: &WorldSeed,
     look: &PlayerLook,
     player_q: &Query<(&Transform, &Player)>,
-) {
+) -> Result<(), String> {
     let Ok((tf, player)) = player_q.single() else {
-        warn!("save_game: player not found");
-        return;
+        return Err("player not found".into());
     };
 
-    let dir = saves_dir();
-    if let Err(e) = fs::create_dir_all(&dir) {
-        error!("Cannot create saves dir {:?}: {}", dir, e);
-        return;
-    }
+    // Имя мира — не перезаписываем, читаем старое.
+    let world_name = fs::read_to_string(&path).ok()
+        .and_then(|s| serde_json::from_str::<SaveMeta>(&s).ok())
+        .map(|m| m.world_name)
+        .unwrap_or_else(|| "Unnamed".into());
 
     let mut edits: Vec<BlockEdit> = Vec::new();
     for chunk_edits in world.edits.values() {
@@ -229,6 +262,7 @@ fn save_game(
     let meta = SaveMeta {
         format_version: 2,
         game_version: env!("CARGO_PKG_VERSION").into(),
+        world_name,
         seed: seed.0,
         saved_at: now,
         player: PlayerMeta {
@@ -242,14 +276,13 @@ fn save_game(
         edits,
     };
 
-    match serde_json::to_string_pretty(&meta) {
-        Ok(s) => {
-            if let Err(e) = fs::write(meta_path(), s) {
-                error!("Cannot write meta.json: {}", e);
-            } else {
-                info!("Saved: {} block edits", meta.edits.len());
-            }
-        }
-        Err(e) => error!("Cannot serialize meta: {}", e),
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+
+    let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+
+    info!("Saved {} block edits", meta.edits.len());
+    Ok(())
 }

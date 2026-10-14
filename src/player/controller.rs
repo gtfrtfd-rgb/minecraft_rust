@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use crate::core::state::{AppState, PlayerLook, SY, KeyBinds};
 use crate::world::chunk::WorldData;
-use crate::save::persistence::LoadedSave;
 
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_RADIUS: f32 = 0.3;
@@ -31,7 +30,6 @@ pub struct PlayerControllerPlugin;
 impl Plugin for PlayerControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_player)
-            .add_systems(Startup, apply_loaded_state.after(spawn_player))
             .add_systems(
                 Update,
                 (player_movement, toggle_fly).run_if(in_state(AppState::InGame)),
@@ -52,26 +50,6 @@ fn spawn_player(mut commands: Commands) {
         Visibility::default(),
         Name::new("Player"),
     ));
-}
-
-fn apply_loaded_state(
-    loaded: Res<LoadedSave>,
-    mut player_q: Query<(&mut Transform, &mut Player)>,
-    mut look: ResMut<PlayerLook>,
-) {
-    let Some(meta) = &loaded.meta else { return; };
-
-    if let Ok((mut tf, mut player)) = player_q.single_mut() {
-        tf.translation = Vec3::new(meta.player.x, meta.player.y, meta.player.z);
-        player.fly = meta.player.fly;
-    }
-    look.yaw = meta.player.yaw;
-    look.pitch = meta.player.pitch;
-
-    info!(
-        "Player position restored: ({:.1}, {:.1}, {:.1}) fly={}",
-        meta.player.x, meta.player.y, meta.player.z, meta.player.fly
-    );
 }
 
 fn toggle_fly(
