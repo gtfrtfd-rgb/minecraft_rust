@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::core::state::{
     AppState, Settings, FPS_OPTIONS, RESOLUTION_OPTIONS, MaxResolutionIndex,
+    data_dir,
 };
 
 const BTN_NORMAL: Color   = Color::srgb(0.18, 0.26, 0.38);
@@ -54,7 +55,15 @@ impl Plugin for SettingsPlugin {
     }
 }
 
+/// Путь к settings.json — в системной папке данных приложения.
 pub fn settings_path() -> PathBuf {
+    let mut p = data_dir();
+    p.push("saves");
+    p.push("settings.json");
+    p
+}
+
+fn legacy_settings_path() -> PathBuf {
     let mut p = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|p| p.to_path_buf()))
@@ -64,9 +73,35 @@ pub fn settings_path() -> PathBuf {
     p
 }
 
+fn migrate_legacy_settings_if_needed() {
+    let new_path = settings_path();
+    let old_path = legacy_settings_path();
+
+    if new_path == old_path { return; }
+    if new_path.exists() { return; }
+    if !old_path.exists() { return; }
+
+    if let Some(parent) = new_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            warn!("Cannot create {:?} for settings migration: {}", parent, e);
+            return;
+        }
+    }
+
+    if fs::copy(&old_path, &new_path).is_ok() {
+        info!(
+            "Migrated settings.json from {:?} to {:?}",
+            old_path, new_path
+        );
+    }
+}
+
 fn load_settings_from_disk(mut settings: ResMut<Settings>) {
+    migrate_legacy_settings_if_needed();
+
     let path = settings_path();
     if !path.exists() {
+        info!("No settings.json — using defaults, will write to {:?}", path);
         return;
     }
     let Ok(s) = fs::read_to_string(&path) else { return; };
@@ -215,7 +250,6 @@ fn spawn_settings_menu(mut commands: Commands) {
 
             root.spawn(Node { height: Val::Px(20.0), ..default() });
 
-            // Кнопка CONTROLS — переход в отдельный экран биндов.
             root.spawn((
                 Button,
                 Interaction::default(),

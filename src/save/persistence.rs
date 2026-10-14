@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::world::chunk::{WorldData, BlockType};
 use crate::player::controller::Player;
-use crate::core::state::{WorldSeed, PlayerLook, SY};
+use crate::core::state::{WorldSeed, PlayerLook, SY, CHUNK_SIZE, data_dir};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlayerMeta {
@@ -34,7 +34,6 @@ pub struct SaveMeta {
     pub seed: u32,
     pub saved_at: u64,
     pub player: PlayerMeta,
-    /// Все правки игрока: сломанные и поставленные блоки.
     pub edits: Vec<BlockEdit>,
 }
 
@@ -43,7 +42,17 @@ pub struct LoadedSave {
     pub meta: Option<SaveMeta>,
 }
 
+/// Папка сохранений в системной папке данных приложения.
 fn saves_dir() -> PathBuf {
+    let mut p = data_dir();
+    p.push("saves");
+    p
+}
+
+fn meta_path() -> PathBuf { saves_dir().join("meta.json") }
+
+/// Путь рядом с exe — для миграции старых сейвов.
+fn legacy_saves_dir() -> PathBuf {
     let mut p = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|p| p.to_path_buf()))
@@ -52,14 +61,50 @@ fn saves_dir() -> PathBuf {
     p
 }
 
-fn meta_path() -> PathBuf { saves_dir().join("meta.json") }
+/// Если новой папки ещё нет, а старая (рядом с exe) существует —
+/// копируем содержимое. Так пользователь не теряет мир после
+/// перехода на новое расположение.
+fn migrate_legacy_save_if_needed() {
+    let new_dir = saves_dir();
+    let old_dir = legacy_saves_dir();
+
+    if new_dir == old_dir { return; }
+    if new_dir.exists() { return; }
+    if !old_dir.exists() { return; }
+
+    if let Err(e) = fs::create_dir_all(&new_dir) {
+        warn!("Cannot create {:?} for migration: {}", new_dir, e);
+        return;
+    }
+
+    let mut copied = 0;
+    if let Ok(entries) = fs::read_dir(&old_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            if let Some(name) = path.file_name() {
+                let dst = new_dir.join(name);
+                if fs::copy(&path, &dst).is_ok() {
+                    copied += 1;
+                }
+            }
+        }
+    }
+
+    if copied > 0 {
+        info!(
+            "Migrated {} save files from {:?} to {:?}",
+            copied, old_dir, new_dir
+        );
+    }
+}
 
 pub struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoadedSave>()
-           .add_systems(PreStartup, load_save_data)
+           .add_systems(PreStartup, (migrate_legacy_save_if_needed, load_save_data).chain())
            .add_systems(PostStartup, apply_loaded_edits)
            .add_systems(Update, auto_save)
            .add_systems(Last, save_on_exit);
@@ -72,6 +117,7 @@ fn load_save_data(mut loaded: ResMut<LoadedSave>) {
 
     if !mpath.exists() {
         info!("No save file found — new world will be generated");
+        info!("Saves will be stored in {:?}", saves_dir());
         return;
     }
 
@@ -92,9 +138,6 @@ fn load_save_data(mut loaded: ResMut<LoadedSave>) {
     loaded.meta = Some(meta);
 }
 
-/// Применяет загруженные правки в WorldData.edits.
-/// Сами чанки будут сгенерированы лениво, и при генерации эти
-/// правки наложатся автоматически (см. `WorldData::insert_chunk`).
 fn apply_loaded_edits(
     loaded: Res<LoadedSave>,
     mut world: ResMut<WorldData>,
@@ -103,8 +146,6 @@ fn apply_loaded_edits(
     let Some(meta) = &loaded.meta else { return; };
 
     seed.0 = meta.seed;
-
-    use crate::core::state::CHUNK_SIZE;
 
     for edit in &meta.edits {
         if edit.y < 0 || edit.y >= SY { continue; }
@@ -168,7 +209,6 @@ fn save_game(
         return;
     }
 
-    // Собираем все правки из всех чанков в плоский список.
     let mut edits: Vec<BlockEdit> = Vec::new();
     for chunk_edits in world.edits.values() {
         for (&pos, &block) in chunk_edits {
@@ -187,7 +227,7 @@ fn save_game(
         .unwrap_or(0);
 
     let meta = SaveMeta {
-        format_version: 2, // поменяли формат — теперь только правки
+        format_version: 2,
         game_version: env!("CARGO_PKG_VERSION").into(),
         seed: seed.0,
         saved_at: now,

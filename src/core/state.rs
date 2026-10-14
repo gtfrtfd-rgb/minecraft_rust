@@ -5,12 +5,56 @@ use bevy::window::{
     PresentMode, Monitor, MonitorSelection,
 };
 use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
 use crate::world::chunk::BlockType;
 
 pub const SY: i32 = 48;
 pub const CHUNK_SIZE: i32 = 16;
 pub const CHUNK_AREA: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
 pub const CHUNK_VOLUME: usize = CHUNK_AREA * SY as usize;
+
+/// Кросс-платформенная папка данных приложения.
+/// Windows: `%APPDATA%\minecraft_rust`
+/// macOS:   `~/Library/Application Support/minecraft_rust`
+/// Linux:   `$XDG_DATA_HOME/minecraft_rust` или `~/.local/share/minecraft_rust`
+/// Fallback: папка рядом с `.exe`.
+pub fn data_dir() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let mut p = PathBuf::from(appdata);
+            p.push("minecraft_rust");
+            return p;
+        }
+    } else if cfg!(target_os = "macos") {
+        if let Ok(home) = std::env::var("HOME") {
+            let mut p = PathBuf::from(home);
+            p.push("Library");
+            p.push("Application Support");
+            p.push("minecraft_rust");
+            return p;
+        }
+    } else {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            if !xdg.is_empty() {
+                let mut p = PathBuf::from(xdg);
+                p.push("minecraft_rust");
+                return p;
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let mut p = PathBuf::from(home);
+            p.push(".local");
+            p.push("share");
+            p.push("minecraft_rust");
+            return p;
+        }
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 // ============================================================
 // СОСТОЯНИЯ ИГРЫ
@@ -89,8 +133,7 @@ impl BindAction {
     }
 }
 
-/// Преобразует строку в KeyCode. Поддерживаемые клавиши — буквы, цифры,
-/// стрелки, Shift/Ctrl/Alt, Space, Tab, Enter, Escape.
+/// Преобразует строку в KeyCode.
 pub fn parse_key(s: &str) -> KeyCode {
     use KeyCode::*;
     match s {
@@ -108,6 +151,7 @@ pub fn parse_key(s: &str) -> KeyCode {
         "ShiftLeft" => ShiftLeft, "ShiftRight" => ShiftRight,
         "ControlLeft" => ControlLeft, "ControlRight" => ControlRight,
         "AltLeft" => AltLeft, "AltRight" => AltRight,
+        "SuperLeft" => SuperLeft, "SuperRight" => SuperRight,
         "ArrowUp" => ArrowUp, "ArrowDown" => ArrowDown,
         "ArrowLeft" => ArrowLeft, "ArrowRight" => ArrowRight,
         "Digit0" => Digit0, "Digit1" => Digit1, "Digit2" => Digit2,
@@ -118,9 +162,7 @@ pub fn parse_key(s: &str) -> KeyCode {
     }
 }
 
-/// Сериализует KeyCode в строку — используем Debug-имя варианта,
-/// например `KeyW`, `Space`, `ShiftLeft`. Это совпадает с тем, что
-/// понимает `parse_key`.
+/// Сериализует KeyCode в строку.
 pub fn key_to_string(k: KeyCode) -> String {
     format!("{:?}", k)
 }
@@ -138,10 +180,8 @@ pub struct Settings {
     pub fps_limit_idx: usize,
     pub resolution_idx: usize,
     pub vsync: bool,
-    /// Оставлено для совместимости со старыми сейвами.
     pub fullscreen: bool,
 
-    // Клавиши (хранятся строками).
     pub key_forward: String,
     pub key_backward: String,
     pub key_left: String,

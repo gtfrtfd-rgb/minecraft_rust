@@ -66,7 +66,7 @@ impl BlockType {
     #[inline]
     pub fn top_tile(self) -> u32 {
         match self {
-            BlockType::Air | BlockType::Stone | BlockType::Obsidian => 3,
+            BlockType::Air | BlockType::Stone => 3,
             BlockType::Grass => 0,
             BlockType::Dirt => 2,
             BlockType::Cobblestone => 4,
@@ -76,6 +76,7 @@ impl BlockType {
             BlockType::Brick => 10,
             BlockType::Glass => 11,
             BlockType::Snow => 12,
+            BlockType::Obsidian => 13,
         }
     }
 
@@ -138,7 +139,6 @@ impl BlockType {
 // ============================================================
 #[derive(Clone)]
 pub struct ChunkData {
-    /// Плоский массив 16×SY×16. Индекс: y*256 + lz*16 + lx.
     pub blocks: Vec<BlockType>,
 }
 
@@ -172,12 +172,11 @@ impl ChunkData {
 }
 
 // ============================================================
-// МИР — разреженное хранилище чанков
+// МИР
 // ============================================================
 #[derive(Resource)]
 pub struct WorldData {
     pub chunks: HashMap<IVec2, ChunkData>,
-    /// Правки игрока: для каждого чанка — карта «мировые координаты → блок».
     pub edits: HashMap<IVec2, HashMap<IVec3, BlockType>>,
 }
 
@@ -572,8 +571,6 @@ fn setup_chunk_render_assets(
     ));
 }
 
-/// Сколько новых чанков генерировать за кадр во время движения.
-/// Больше = быстрее прогружается, но возможны микрофризы.
 const STREAM_BUDGET_PER_FRAME: usize = 6;
 
 fn stream_chunks(
@@ -593,24 +590,16 @@ fn stream_chunks(
     let pcx = (pt.translation.x.floor() as i32).div_euclid(CHUNK_SIZE);
     let pcz = (pt.translation.z.floor() as i32).div_euclid(CHUNK_SIZE);
 
-    // Радиус рендера — прямо в чанках.
     let rd = settings.render_distance_chunks;
-
-    // Буфер генерации: генерируем на 2 чанка дальше, чем рендерим.
-    // Благодаря этому к моменту, когда чанк попадает в зону видимости,
-    // он уже готов.
     let load_rd = rd + 2;
 
     let rendered: std::collections::HashSet<IVec2> =
         chunk_q.iter().map(|(_, c)| c.coord).collect();
 
     let first_run = !*initialized;
-    // На первом кадре — без бюджета: иначе игрок окажется над пустотой.
     let budget = if first_run { usize::MAX } else { STREAM_BUDGET_PER_FRAME };
 
     if budget > 0 {
-        // Приоритет по полю зрения: чанки спереди грузятся в 3 раза
-        // раньше, чем чанки сзади.
         let fwd = pt.forward().as_vec3();
         let fwd_x = fwd.x;
         let fwd_z = fwd.z;
@@ -640,7 +629,6 @@ fn stream_chunks(
         }
     }
 
-    // Спавним сущности для чанков в радиусе рендера.
     for dz in -rd..=rd {
         for dx in -rd..=rd {
             let cx = pcx + dx;
@@ -661,10 +649,6 @@ fn stream_chunks(
         }
     }
 
-    // Выгружаем сущности строго за радиуса рендера — с запасом в 0.
-    // Это значит: если игрок ушёл, чанк мгновенно исчезнет,
-    // но т.к. он и так был на самой границе видимости, глазу это
-    // незаметно.
     for (entity, chunk) in chunk_q.iter() {
         let dx = (chunk.coord.x - pcx).abs();
         let dz = (chunk.coord.y - pcz).abs();
@@ -673,7 +657,6 @@ fn stream_chunks(
         }
     }
 
-    // Выгружаем из памяти чанки, ушедшие слишком далеко (кэш).
     let mem_rd = rd + 4;
     let to_remove: Vec<IVec2> = world
         .chunks
