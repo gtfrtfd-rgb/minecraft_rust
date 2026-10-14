@@ -267,13 +267,9 @@ fn mob_collides(world: &WorldData, px: f32, py: f32, pz: f32, r: f32, h: f32) ->
 
 fn highest_solid(world: &WorldData, x: i32, z: i32) -> Option<i32> {
     use crate::core::state::SY;
-    for y in (1..SY - 1).rev() {
-        if world.get(x, y, z).is_solid() {
-            return Some(y);
-        }
-    }
-    None
+    (1..SY - 1).rev().find(|&y| world.get(x, y, z).is_solid())
 }
+
 
 fn mob_ai_think(
     time: Res<Time>,

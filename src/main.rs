@@ -1,3 +1,9 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::manual_range_contains,
+)]
+
 mod core;
 mod world;
 mod player;

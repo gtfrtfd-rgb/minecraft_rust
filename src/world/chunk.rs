@@ -681,7 +681,7 @@ fn rebuild_dirty_chunks(
     dirty.0.sort_by_key(|c| (c.x, c.y));
     dirty.0.dedup();
 
-    let coords: Vec<IVec2> = dirty.0.drain(..).collect();
+    let coords: Vec<IVec2> = std::mem::take(&mut dirty.0);
     let t0 = std::time::Instant::now();
     let mut rebuilt = 0;
     let mut total_verts = 0usize;

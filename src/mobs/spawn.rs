@@ -491,7 +491,7 @@ fn spawn_cycle(
 
     for _ in 0..SPAWN_ATTEMPTS_PER_CYCLE {
         // Если после спавна стаи мы уже у лимита — выходим.
-        let current = mob_q.iter().count() + 0; // текущий + только что заспавненные из commands ещё не видны
+        let current = mob_q.iter().count();
         if nearby + current >= PASSIVE_MOB_CAP * 2 {
             // грубая защита: не спавним больше в этом цикле,
             // если как будто уже перебор.
