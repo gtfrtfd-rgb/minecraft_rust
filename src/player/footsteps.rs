@@ -62,6 +62,10 @@ fn footsteps_system(
 
     let on_ground = !player.fly && player.on_ground;
 
+    // --------------------------------------------------------------
+    // Проверка приземления (обычная + bunny-hop).
+    // Использует last_velocity_y и airborne_time из ПРОШЛОГО кадра.
+    // --------------------------------------------------------------
     let landed_normally = on_ground && *airborne_time > MIN_AIRBORNE_TIME;
     let landed_bunny = !on_ground
         && vy > 0.0
@@ -103,21 +107,32 @@ fn footsteps_system(
         }
     }
 
+    // --------------------------------------------------------------
+    // Обновляем трекеры.
+    // --------------------------------------------------------------
     if on_ground {
         *airborne_time = 0.0;
     } else {
         *airborne_time += dt;
     }
     *last_velocity_y = vy;
-    *last_pos = pos;
 
+    // В воздухе — сохраняем позицию для будущего расчёта и выходим.
     if !on_ground {
+        *last_pos = pos;
         return;
     }
 
+    // --------------------------------------------------------------
+    // Обычные шаги.
+    // Считаем горизонтальную скорость ОТ предыдущей позиции.
+    // --------------------------------------------------------------
     let dx = pos.x - last_pos.x;
     let dz = pos.z - last_pos.z;
     let horiz_speed = ((dx * dx + dz * dz).sqrt()) / dt;
+
+    // ВАЖНО: обновляем last_pos ТОЛЬКО после расчёта dx/dz.
+    *last_pos = pos;
 
     if horiz_speed < MIN_SPEED {
         *step_timer = 0.0;
