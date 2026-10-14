@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
 
-use crate::core::state::{AppState, Settings};
+use crate::core::state::{AppState, Settings, KeyBinds};
 use crate::world::chunk::WorldData;
 use crate::audio::SoundHandles;
 use super::controller::Player;
@@ -18,10 +18,6 @@ const MIN_SPEED: f32 = 0.5;
 const MIN_AIRBORNE_TIME: f32 = 0.15;
 const HARD_LANDING_TIME: f32 = 0.45;
 
-/// Скорость падения, ниже которой считаем, что игрок реально падал,
-/// а не «дрожал на границе» прыжка. -2.0 м/с = ~0.2 сек свободного
-/// падения — более чем достаточно, чтобы не сработать на сглаживании
-/// гравитации в одном кадре.
 const FALL_SPEED_THRESHOLD: f32 = -2.0;
 
 pub struct FootstepsPlugin;
@@ -47,6 +43,7 @@ fn footsteps_system(
     world: Res<WorldData>,
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<Settings>,
+    binds: Res<KeyBinds>,
     player_q: Query<(&Transform, &Player)>,
     sounds: Option<Res<SoundHandles>>,
     mut commands: Commands,
@@ -63,19 +60,8 @@ fn footsteps_system(
     let vy = player.velocity.y;
     let master = settings.master_volume;
 
-    // «На земле» с точки зрения footsteps: не в полёте и on_ground.
-    // При bunny-hop on_ground сбрасывается в false в том же кадре,
-    // поэтому поймать это через флаг невозможно — см. ниже.
     let on_ground = !player.fly && player.on_ground;
 
-    // Приземление может проявиться двумя способами:
-    //
-    // 1. Нормальное: игрок on_ground, в воздухе был достаточно долго.
-    //    (медленный прыжок, падение с высоты)
-    //
-    // 2. Bunny-hop: игрок в этом кадре снова прыгнул — velocity.y
-    //    стала положительной, хотя в прошлом кадре была сильно
-    //    отрицательной. Значит между кадрами было касание земли.
     let landed_normally = on_ground && *airborne_time > MIN_AIRBORNE_TIME;
     let landed_bunny = !on_ground
         && vy > 0.0
@@ -117,7 +103,6 @@ fn footsteps_system(
         }
     }
 
-    // Обновляем трекеры.
     if on_ground {
         *airborne_time = 0.0;
     } else {
@@ -126,7 +111,6 @@ fn footsteps_system(
     *last_velocity_y = vy;
     *last_pos = pos;
 
-    // Обычные шаги — только если игрок реально на земле.
     if !on_ground {
         return;
     }
@@ -140,8 +124,7 @@ fn footsteps_system(
         return;
     }
 
-    let crouching = keys.pressed(KeyCode::ShiftLeft)
-        || keys.pressed(KeyCode::ShiftRight);
+    let crouching = keys.pressed(binds.sneak);
 
     let base_interval = (2.4 / horiz_speed).clamp(0.18, 0.40);
     let interval = if crouching {
@@ -167,9 +150,7 @@ fn footsteps_system(
 
     let Some(s) = sounds.as_ref() else { return; };
     let variants = s.step_sounds_for(block);
-    if variants.is_empty() {
-        return;
-    }
+    if variants.is_empty() { return; }
 
     let idx = (lcg_rand(&mut rng_state) as usize) % variants.len();
     let handle = variants[idx].clone();

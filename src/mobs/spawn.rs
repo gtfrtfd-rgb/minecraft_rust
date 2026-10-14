@@ -5,7 +5,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::RngExt;
 
-use crate::core::state::{SY, AppState};
+use crate::core::state::{SY, AppState, CHUNK_SIZE};
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 use super::ai::{Mob, MobType};
@@ -17,24 +17,45 @@ impl Plugin for MobSpawnPlugin {
         app.add_systems(Startup, setup_mob_assets)
             .add_systems(
                 Update,
-                spawn_and_maintain_mobs.run_if(in_state(AppState::InGame)),
+                spawn_cycle.run_if(in_state(AppState::InGame)),
             );
         info!("MobSpawnPlugin loaded.");
     }
 }
 
-const INITIAL_MOB_COUNT: usize = 40;
-const MIN_DIST_FROM_PLAYER: f32 = 16.0;
-const MAX_DIST_FROM_PLAYER: f32 = 64.0;
-const SKY_CLEARANCE: i32 = 5;
+// ============================================================
+// ПАРАМЕТРЫ СПАВНА (в стиле Minecraft, с ускорением)
+// ============================================================
 
-/// Мобы подгружаются порциями, чтобы не фризить при старте.
-const MOBS_PER_FRAME: usize = 2;
+/// Минимальное расстояние от игрока, на котором может появиться моб.
+const MIN_SPAWN_DISTANCE: f32 = 24.0;
 
-/// Каждые N секунд пробуем добавить 1 моба, если поголовье
-/// меньше целевого (после смерти или ухода за пределы видимости).
-const RESPAWN_INTERVAL: f32 = 3.0;
-const MIN_POPULATION: usize = 25;
+/// Максимальное расстояние от игрока, на котором может появиться моб.
+const MAX_SPAWN_DISTANCE: f32 = 128.0;
+
+/// Максимальное количество пассивных мобов в радиусе 128 блоков.
+/// В Minecraft vanilla = 10, но здесь — с запасом, чтобы мир
+/// не выглядел пустым.
+const PASSIVE_MOB_CAP: usize = 30;
+
+/// Интервал между циклами спавна. В Minecraft vanilla = 20 сек,
+/// здесь — чаще, чтобы мобы появлялись быстрее.
+const SPAWN_CYCLE_INTERVAL: f32 = 4.0;
+
+/// Сколько попыток спавна делается за один цикл.
+const SPAWN_ATTEMPTS_PER_CYCLE: usize = 16;
+
+/// Размер стаи — сколько мобов появляется рядом при удачной попытке.
+/// В Minecraft пассивные мобы спавнятся группами 2–4.
+const PACK_SIZE_MIN: usize = 2;
+const PACK_SIZE_MAX: usize = 4;
+
+/// Радиус разброса внутри стаи (в блоках).
+const PACK_RADIUS: f32 = 4.0;
+
+// ============================================================
+// АТЛАС ТЕКСТУР
+// ============================================================
 
 const TILE: u32 = 16;
 const ATLAS_COLS: u32 = 4;
@@ -391,7 +412,6 @@ fn build_leg_mesh(mt: MobType) -> Mesh {
 // РЕСУРС АССЕТОВ
 // ============================================================
 
-/// Пре-созданные меши и материалы мобов. Создаётся один раз на Startup.
 #[derive(Resource)]
 struct MobAssets {
     pig_body: Handle<Mesh>,
@@ -437,54 +457,59 @@ fn setup_mob_assets(
 // СИСТЕМА СПАВНА
 // ============================================================
 
-fn spawn_and_maintain_mobs(
+/// Цикл спавна пассивных мобов.
+/// Отличие от Minecraft: чаще цикл, больше лимит, и стайный спавн
+/// с повышенным шансом.
+fn spawn_cycle(
     mut commands: Commands,
     assets: Option<Res<MobAssets>>,
     world: Res<WorldData>,
     player_q: Query<&Transform, With<Player>>,
-    mob_q: Query<(), With<Mob>>,
-    mut spawned_initial: Local<usize>,
-    mut respawn_timer: Local<f32>,
+    mob_q: Query<&Transform, With<Mob>>,
+    mut cycle_timer: Local<f32>,
     time: Res<Time>,
 ) {
     let Some(assets) = assets else { return; };
-
     let Ok(pt) = player_q.single() else { return; };
     let player_pos = pt.translation;
 
-    if player_pos.y < 2.0 { return; }
+    // Цикл спавна.
+    *cycle_timer += time.delta_secs();
+    if *cycle_timer < SPAWN_CYCLE_INTERVAL { return; }
+    *cycle_timer = 0.0;
 
-    let mob_count = mob_q.iter().count();
+    // Считаем мобов в радиусе 128 блоков.
+    let nearby = mob_q
+        .iter()
+        .filter(|tf| tf.translation.distance(player_pos) <= MAX_SPAWN_DISTANCE)
+        .count();
 
-    let mut to_spawn = 0usize;
-    if *spawned_initial < INITIAL_MOB_COUNT {
-        to_spawn = MOBS_PER_FRAME.min(INITIAL_MOB_COUNT - *spawned_initial);
-    } else {
-        *respawn_timer += time.delta_secs();
-        if *respawn_timer > RESPAWN_INTERVAL {
-            *respawn_timer = 0.0;
-            if mob_count < MIN_POPULATION {
-                to_spawn = 1;
-            }
-        }
-    }
-
-    if to_spawn == 0 { return; }
+    if nearby >= PASSIVE_MOB_CAP { return; }
 
     let mut rng = rand::rng();
     let types = [MobType::Pig, MobType::Sheep, MobType::Cow, MobType::Chicken];
 
-    let mut attempts = 0;
-    let max_attempts = to_spawn * 30;
+    for _ in 0..SPAWN_ATTEMPTS_PER_CYCLE {
+        // Если после спавна стаи мы уже у лимита — выходим.
+        let current = mob_q.iter().count() + 0; // текущий + только что заспавненные из commands ещё не видны
+        if nearby + current >= PASSIVE_MOB_CAP * 2 {
+            // грубая защита: не спавним больше в этом цикле,
+            // если как будто уже перебор.
+            break;
+        }
 
-    while to_spawn > 0 && attempts < max_attempts {
-        attempts += 1;
-
+        // Случайная точка в кольце 24–128 блоков от игрока.
         let angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let dist = rng.random_range(MIN_DIST_FROM_PLAYER..MAX_DIST_FROM_PLAYER);
+        let dist = rng.random_range(MIN_SPAWN_DISTANCE..MAX_SPAWN_DISTANCE);
         let wx = (player_pos.x + angle.cos() * dist).floor() as i32;
         let wz = (player_pos.z + angle.sin() * dist).floor() as i32;
 
+        // Чанк должен быть загружен.
+        let cx = wx.div_euclid(CHUNK_SIZE);
+        let cz = wz.div_euclid(CHUNK_SIZE);
+        if !world.has_chunk(cx, cz) { continue; }
+
+        // Верхний solid-блок в этом столбце.
         let mut top_y: Option<i32> = None;
         for y in (1..SY - 1).rev() {
             if world.get(wx, y, wz).is_solid() {
@@ -495,18 +520,20 @@ fn spawn_and_maintain_mobs(
         let Some(ground_y) = top_y else { continue };
         let spawn_y = ground_y + 1;
 
+        // Над головой свободно.
         let mut sky_clear = true;
-        for dy in 0..SKY_CLEARANCE {
-            let check_y = spawn_y + dy;
-            if check_y >= SY { break; }
-            if world.get(wx, check_y, wz).is_solid() {
+        for dy in 0..3 {
+            if world.get(wx, spawn_y + dy, wz).is_solid() {
                 sky_clear = false;
                 break;
             }
         }
         if !sky_clear { continue; }
 
+        // Определяем тип и размер стаи.
         let mob_type = types[rng.random_range(0..types.len())];
+        let pack_size = rng.random_range(PACK_SIZE_MIN..=PACK_SIZE_MAX);
+
         let (body_mesh, leg_mesh, material) = match mob_type {
             MobType::Pig     => (assets.pig_body.clone(),     assets.pig_leg.clone(),     assets.pig_mat.clone()),
             MobType::Sheep   => (assets.sheep_body.clone(),   assets.sheep_leg.clone(),   assets.sheep_mat.clone()),
@@ -514,20 +541,64 @@ fn spawn_and_maintain_mobs(
             MobType::Chicken => (assets.chicken_body.clone(), assets.chicken_leg.clone(), assets.chicken_mat.clone()),
         };
 
-        let yaw = rng.random_range(0.0..std::f32::consts::TAU);
+        // Спавним стаю из pack_size мобов в радиусе PACK_RADIUS
+        // вокруг выбранной точки.
+        let mut spawned_in_pack = 0usize;
+        for _ in 0..pack_size * 3 {
+            if spawned_in_pack >= pack_size { break; }
 
-        spawn_mob(
-            &mut commands,
-            body_mesh,
-            leg_mesh,
-            material,
-            mob_type,
-            Vec3::new(wx as f32 + 0.5, spawn_y as f32, wz as f32 + 0.5),
-            yaw,
-        );
+            // Смещение внутри стаи.
+            let ox = rng.random_range(-PACK_RADIUS..PACK_RADIUS);
+            let oz = rng.random_range(-PACK_RADIUS..PACK_RADIUS);
+            let mx = wx + ox.floor() as i32;
+            let mz = wz + oz.floor() as i32;
 
-        *spawned_initial += 1;
-        to_spawn -= 1;
+            // Тот же чанк должен быть загружен.
+            let mcx = mx.div_euclid(CHUNK_SIZE);
+            let mcz = mz.div_euclid(CHUNK_SIZE);
+            if !world.has_chunk(mcx, mcz) { continue; }
+
+            // Ищем верхний solid-блок для новой позиции.
+            let mut my: Option<i32> = None;
+            for y in (1..SY - 1).rev() {
+                if world.get(mx, y, mz).is_solid() {
+                    my = Some(y);
+                    break;
+                }
+            }
+            let Some(gy) = my else { continue };
+            let sy = gy + 1;
+
+            // Над головой свободно.
+            let mut ok = true;
+            for dy in 0..3 {
+                if world.get(mx, sy + dy, mz).is_solid() {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok { continue; }
+
+            let yaw = rng.random_range(0.0..std::f32::consts::TAU);
+
+            spawn_mob(
+                &mut commands,
+                body_mesh.clone(),
+                leg_mesh.clone(),
+                material.clone(),
+                mob_type,
+                Vec3::new(mx as f32 + 0.5, sy as f32, mz as f32 + 0.5),
+                yaw,
+            );
+
+            spawned_in_pack += 1;
+        }
+
+        // Одна успешная попытка — можно завершить цикл
+        // (в Minecraft тоже спавнят «пачкой» за один успешный тик).
+        if spawned_in_pack > 0 {
+            break;
+        }
     }
 }
 

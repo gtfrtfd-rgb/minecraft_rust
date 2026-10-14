@@ -113,30 +113,6 @@ fn setup_hud(mut commands: Commands) {
                 FpsText,
             ));
         });
-
-    // Правый верхний угол — подсказки по управлению.
-    commands.spawn((
-        Text::new(
-            "WASD / Arrows - move\n\
-             Space - jump   Ctrl - sprint   Shift - crouch\n\
-             F - fly   LMB - break   RMB - place\n\
-             1-9 / MouseWheel - slot   Esc - pause",
-        ),
-        TextFont {
-            font_size: FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(12.0),
-            top: Val::Px(10.0),
-            ..default()
-        },
-        TextLayout::justify(Justify::Right),
-        HudRoot,
-        Name::new("HudHelp"),
-    ));
 }
 
 fn update_coords(

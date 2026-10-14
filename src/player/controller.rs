@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::core::state::{AppState, PlayerLook, SY};
+use crate::core::state::{AppState, PlayerLook, SY, KeyBinds};
 use crate::world::chunk::WorldData;
 use crate::save::persistence::LoadedSave;
 
@@ -76,9 +76,10 @@ fn apply_loaded_state(
 
 fn toggle_fly(
     keys: Res<ButtonInput<KeyCode>>,
+    binds: Res<KeyBinds>,
     mut player_q: Query<&mut Player>,
 ) {
-    if keys.just_pressed(KeyCode::KeyF) {
+    if keys.just_pressed(binds.fly) {
         for mut p in player_q.iter_mut() {
             p.fly = !p.fly;
             p.velocity.y = 0.0;
@@ -113,7 +114,6 @@ fn ground_surface_below(world: &WorldData, px: f32, py: f32, pz: f32) -> Option<
     let z1 = (pz + PLAYER_RADIUS).floor() as i32;
 
     let mut best: Option<f32> = None;
-
     let y_min = (py - GROUND_SNAP).floor() as i32;
     let y_max = py.ceil() as i32;
 
@@ -137,6 +137,7 @@ fn player_movement(
     world: Res<WorldData>,
     look: Res<PlayerLook>,
     keys: Res<ButtonInput<KeyCode>>,
+    binds: Res<KeyBinds>,
     time: Res<Time>,
 ) {
     let dt = time.delta_secs().min(0.05);
@@ -145,30 +146,29 @@ fn player_movement(
     let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
     let right = Vec3::new(yaw.cos(), 0.0, -yaw.sin());
 
-    let space_held = keys.pressed(KeyCode::Space);
+    let space_held = keys.pressed(binds.jump);
+    let sprint_held = keys.pressed(binds.sprint);
+    let sneak_held = keys.pressed(binds.sneak);
 
     for (mut transform, mut player) in player_q.iter_mut() {
         let mut dir = Vec3::ZERO;
 
-        if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
+        if keys.pressed(binds.forward) {
             dir += forward;
         }
-        if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
+        if keys.pressed(binds.backward) {
             dir -= forward;
         }
-        if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+        if keys.pressed(binds.right) {
             dir += right;
         }
-        if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+        if keys.pressed(binds.left) {
             dir -= right;
         }
 
         if dir.length_squared() > 0.0 {
             dir = dir.normalize();
         }
-
-        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
         if space_held {
             player.jump_buffer = JUMP_BUFFER;
@@ -181,12 +181,12 @@ fn player_movement(
         }
 
         if player.fly {
-            let speed = if ctrl { FLY_SPEED_FAST } else { FLY_SPEED };
+            let speed = if sprint_held { FLY_SPEED_FAST } else { FLY_SPEED };
             let mut vel = dir * speed;
             if space_held {
                 vel.y += speed;
             }
-            if shift {
+            if sneak_held {
                 vel.y -= speed;
             }
             player.velocity = vel;
@@ -209,9 +209,9 @@ fn player_movement(
             continue;
         }
 
-        let speed = if ctrl { SPRINT_SPEED } else { WALK_SPEED };
+        let speed = if sprint_held { SPRINT_SPEED } else { WALK_SPEED };
         let horiz_vel = dir * speed;
-        let horiz_vel = if shift { horiz_vel * 0.5 } else { horiz_vel };
+        let horiz_vel = if sneak_held { horiz_vel * 0.5 } else { horiz_vel };
 
         player.velocity.y -= GRAVITY * dt;
         if player.velocity.y < -55.0 {
@@ -261,7 +261,6 @@ fn player_movement(
             player.coyote_timer = 0.0;
         }
 
-        // Если упал ниже мира — телепортируем наверх.
         if transform.translation.y < -10.0 {
             transform.translation.y = (SY - 10) as f32;
             player.velocity = Vec3::ZERO;

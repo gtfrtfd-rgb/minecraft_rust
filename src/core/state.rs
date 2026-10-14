@@ -20,6 +20,7 @@ pub enum AppState {
     #[default]
     Menu,
     Settings,
+    Keybinds,
     InGame,
     Paused,
 }
@@ -28,14 +29,8 @@ pub enum AppState {
 // СПИСКИ ВАРИАНТОВ
 // ============================================================
 
-/// Варианты ограничения FPS.
 pub const FPS_OPTIONS: [u32; 8] = [30, 60, 90, 120, 144, 165, 180, 240];
 
-/// Варианты разрешения окна (все 16:9).
-///
-/// Если пользователь выбирает вариант, совпадающий с физическим
-/// разрешением монитора, окно автоматически разворачивается
-/// в borderless fullscreen. Более низкие варианты — обычное окно.
 pub const RESOLUTION_OPTIONS: [(u32, u32); 5] = [
     (1280, 720),
     (1600, 900),
@@ -44,17 +39,90 @@ pub const RESOLUTION_OPTIONS: [(u32, u32); 5] = [
     (3840, 2160),
 ];
 
-/// Максимальный индекс в `RESOLUTION_OPTIONS`, который не превышает
-/// физическое разрешение самого большого монитора. Вычисляется
-/// один раз на старте.
 #[derive(Resource)]
 pub struct MaxResolutionIndex(pub usize);
 
 impl Default for MaxResolutionIndex {
     fn default() -> Self {
-        // Пока монитор неизвестен — разрешаем всё.
         Self(RESOLUTION_OPTIONS.len() - 1)
     }
+}
+
+// ============================================================
+// ДЕЙСТВИЯ, КОТОРЫЕ МОЖНО ПЕРЕНАЗНАЧИТЬ
+// ============================================================
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BindAction {
+    Forward,
+    Backward,
+    Left,
+    Right,
+    Jump,
+    Sprint,
+    Sneak,
+    Fly,
+}
+
+impl BindAction {
+    pub const ALL: [BindAction; 8] = [
+        BindAction::Forward,
+        BindAction::Backward,
+        BindAction::Left,
+        BindAction::Right,
+        BindAction::Jump,
+        BindAction::Sprint,
+        BindAction::Sneak,
+        BindAction::Fly,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BindAction::Forward  => "Move Forward",
+            BindAction::Backward => "Move Backward",
+            BindAction::Left     => "Move Left",
+            BindAction::Right    => "Move Right",
+            BindAction::Jump     => "Jump",
+            BindAction::Sprint   => "Sprint",
+            BindAction::Sneak    => "Sneak",
+            BindAction::Fly      => "Toggle Fly",
+        }
+    }
+}
+
+/// Преобразует строку в KeyCode. Поддерживаемые клавиши — буквы, цифры,
+/// стрелки, Shift/Ctrl/Alt, Space, Tab, Enter, Escape.
+pub fn parse_key(s: &str) -> KeyCode {
+    use KeyCode::*;
+    match s {
+        "KeyW" => KeyW, "KeyA" => KeyA, "KeyS" => KeyS, "KeyD" => KeyD,
+        "KeyQ" => KeyQ, "KeyE" => KeyE, "KeyR" => KeyR, "KeyF" => KeyF,
+        "KeyZ" => KeyZ, "KeyX" => KeyX, "KeyC" => KeyC, "KeyV" => KeyV,
+        "KeyB" => KeyB, "KeyG" => KeyG, "KeyH" => KeyH, "KeyJ" => KeyJ,
+        "KeyK" => KeyK, "KeyL" => KeyL, "KeyM" => KeyM, "KeyN" => KeyN,
+        "KeyO" => KeyO, "KeyP" => KeyP, "KeyT" => KeyT, "KeyU" => KeyU,
+        "KeyI" => KeyI, "KeyY" => KeyY,
+        "Space" => Space,
+        "Tab" => Tab,
+        "Enter" => Enter,
+        "Escape" => Escape,
+        "ShiftLeft" => ShiftLeft, "ShiftRight" => ShiftRight,
+        "ControlLeft" => ControlLeft, "ControlRight" => ControlRight,
+        "AltLeft" => AltLeft, "AltRight" => AltRight,
+        "ArrowUp" => ArrowUp, "ArrowDown" => ArrowDown,
+        "ArrowLeft" => ArrowLeft, "ArrowRight" => ArrowRight,
+        "Digit0" => Digit0, "Digit1" => Digit1, "Digit2" => Digit2,
+        "Digit3" => Digit3, "Digit4" => Digit4, "Digit5" => Digit5,
+        "Digit6" => Digit6, "Digit7" => Digit7, "Digit8" => Digit8,
+        "Digit9" => Digit9,
+        _ => KeyW,
+    }
+}
+
+/// Сериализует KeyCode в строку — используем Debug-имя варианта,
+/// например `KeyW`, `Space`, `ShiftLeft`. Это совпадает с тем, что
+/// понимает `parse_key`.
+pub fn key_to_string(k: KeyCode) -> String {
+    format!("{:?}", k)
 }
 
 // ============================================================
@@ -70,10 +138,18 @@ pub struct Settings {
     pub fps_limit_idx: usize,
     pub resolution_idx: usize,
     pub vsync: bool,
-    /// Оставлено для обратной совместимости со старыми сейвами —
-    /// больше не используется в UI, режим окна определяется
-    /// автоматически по выбранному разрешению.
+    /// Оставлено для совместимости со старыми сейвами.
     pub fullscreen: bool,
+
+    // Клавиши (хранятся строками).
+    pub key_forward: String,
+    pub key_backward: String,
+    pub key_left: String,
+    pub key_right: String,
+    pub key_jump: String,
+    pub key_sprint: String,
+    pub key_sneak: String,
+    pub key_fly: String,
 }
 
 impl Default for Settings {
@@ -82,12 +158,18 @@ impl Default for Settings {
             master_volume: 0.8,
             mouse_sensitivity: 0.0022,
             render_distance_chunks: 12,
-            fps_limit_idx: 1,       // 60
-            // По умолчанию — 720p в окне. Если у монитора физическое
-            // разрешение тоже 720p — окно развернётся на весь экран.
+            fps_limit_idx: 1,
             resolution_idx: 0,
             vsync: true,
             fullscreen: false,
+            key_forward:  "KeyW".into(),
+            key_backward: "KeyS".into(),
+            key_left:     "KeyA".into(),
+            key_right:    "KeyD".into(),
+            key_jump:     "Space".into(),
+            key_sprint:   "ControlLeft".into(),
+            key_sneak:    "ShiftLeft".into(),
+            key_fly:      "KeyF".into(),
         }
     }
 }
@@ -99,6 +181,67 @@ impl Settings {
     pub fn resolution(&self) -> (u32, u32) {
         RESOLUTION_OPTIONS[self.resolution_idx.min(RESOLUTION_OPTIONS.len() - 1)]
     }
+    pub fn key_for(&self, action: BindAction) -> KeyCode {
+        parse_key(self.key_string_for(action))
+    }
+    pub fn key_string_for(&self, action: BindAction) -> &str {
+        match action {
+            BindAction::Forward  => &self.key_forward,
+            BindAction::Backward => &self.key_backward,
+            BindAction::Left     => &self.key_left,
+            BindAction::Right    => &self.key_right,
+            BindAction::Jump     => &self.key_jump,
+            BindAction::Sprint   => &self.key_sprint,
+            BindAction::Sneak    => &self.key_sneak,
+            BindAction::Fly      => &self.key_fly,
+        }
+    }
+    pub fn set_key_string(&mut self, action: BindAction, s: String) {
+        match action {
+            BindAction::Forward  => self.key_forward = s,
+            BindAction::Backward => self.key_backward = s,
+            BindAction::Left     => self.key_left = s,
+            BindAction::Right    => self.key_right = s,
+            BindAction::Jump     => self.key_jump = s,
+            BindAction::Sprint   => self.key_sprint = s,
+            BindAction::Sneak    => self.key_sneak = s,
+            BindAction::Fly      => self.key_fly = s,
+        }
+    }
+}
+
+/// Кэш KeyCode — чтобы не парсить строки каждый кадр.
+#[derive(Resource)]
+pub struct KeyBinds {
+    pub forward: KeyCode,
+    pub backward: KeyCode,
+    pub left: KeyCode,
+    pub right: KeyCode,
+    pub jump: KeyCode,
+    pub sprint: KeyCode,
+    pub sneak: KeyCode,
+    pub fly: KeyCode,
+}
+
+impl KeyBinds {
+    pub fn from_settings(s: &Settings) -> Self {
+        Self {
+            forward:  s.key_for(BindAction::Forward),
+            backward: s.key_for(BindAction::Backward),
+            left:     s.key_for(BindAction::Left),
+            right:    s.key_for(BindAction::Right),
+            jump:     s.key_for(BindAction::Jump),
+            sprint:   s.key_for(BindAction::Sprint),
+            sneak:    s.key_for(BindAction::Sneak),
+            fly:      s.key_for(BindAction::Fly),
+        }
+    }
+}
+
+/// Действие, для которого сейчас ждём нажатия клавиши.
+#[derive(Resource, Default)]
+pub struct RebindingState {
+    pub action: Option<BindAction>,
 }
 
 #[derive(Resource)]
@@ -134,10 +277,13 @@ impl Plugin for GameStatePlugin {
             .init_resource::<SelectedSlot>()
             .init_resource::<Settings>()
             .init_resource::<MaxResolutionIndex>()
+            .init_resource::<RebindingState>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
+            .add_systems(Startup, init_keybinds)
             .add_systems(Update, handle_slot_input.run_if(in_state(AppState::InGame)))
             .add_systems(Update, compute_max_resolution)
+            .add_systems(Update, update_keybinds)
             .add_systems(Last, (
                 apply_window,
                 apply_vsync,
@@ -147,11 +293,22 @@ impl Plugin for GameStatePlugin {
     }
 }
 
-/// Один раз вычисляет максимальный индекс в `RESOLUTION_OPTIONS`,
-/// который помещается на самый большой монитор. Использует
-/// **физическое** разрешение без вычетов — специально, чтобы
-/// пользователь мог выбрать нативное разрешение и получить
-/// fullscreen.
+fn init_keybinds(
+    mut commands: Commands,
+    settings: Res<Settings>,
+) {
+    let binds = KeyBinds::from_settings(&settings);
+    commands.insert_resource(binds);
+}
+
+fn update_keybinds(
+    settings: Res<Settings>,
+    mut binds: ResMut<KeyBinds>,
+) {
+    if !settings.is_changed() { return; }
+    *binds = KeyBinds::from_settings(&settings);
+}
+
 fn compute_max_resolution(
     mut commands: Commands,
     mut done: Local<bool>,
@@ -173,7 +330,6 @@ fn compute_max_resolution(
         }
     }
 
-    // Ищем самый большой вариант, который не превышает физическое.
     let mut max_idx = 0;
     for (i, &(w, h)) in RESOLUTION_OPTIONS.iter().enumerate() {
         if w <= max_w && h <= max_h {
@@ -181,8 +337,6 @@ fn compute_max_resolution(
         }
     }
 
-    // Если сохранённое разрешение больше физического — откатываем
-    // до максимально доступного.
     if settings.resolution_idx > max_idx {
         settings.resolution_idx = max_idx;
         info!(
@@ -202,14 +356,6 @@ fn compute_max_resolution(
     );
 }
 
-/// Применяет размер окна и режим. Одна система вместо двух.
-///
-/// Логика:
-///   • Если выбранное разрешение == физическое (индекс = максимуму) —
-///     окно разворачивается в borderless fullscreen. Разрешение
-///     игнорируется, размер окна = размер монитора, ничего не
-///     вылезает за границы.
-///   • Иначе — обычное окно с указанным разрешением, центрировано.
 fn apply_window(
     settings: Res<Settings>,
     max_res: Res<MaxResolutionIndex>,
@@ -235,8 +381,6 @@ fn apply_window(
             win.mode = desired_mode;
         }
 
-        // Разрешение применяем только в оконном режиме — иначе
-        // оконный менеджер сам задаёт размер.
         if !want_fullscreen {
             let current_w = win.resolution.physical_width();
             let current_h = win.resolution.physical_height();
@@ -257,14 +401,11 @@ fn apply_window(
     }
 }
 
-/// Реактивно включает / выключает VSync.
 fn apply_vsync(
     settings: Res<Settings>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if !settings.is_changed() {
-        return;
-    }
+    if !settings.is_changed() { return; }
     let desired = if settings.vsync {
         PresentMode::AutoVsync
     } else {
@@ -272,15 +413,12 @@ fn apply_vsync(
     };
 
     for mut win in window_q.iter_mut() {
-        if win.present_mode == desired {
-            continue;
-        }
+        if win.present_mode == desired { continue; }
         win.present_mode = desired;
         info!("VSync: {}", settings.vsync);
     }
 }
 
-/// Ограничение FPS через sleep в конце кадра.
 fn apply_fps_limit(
     settings: Res<Settings>,
     time: Res<Time>,

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::RngExt;
 
-use crate::core::state::{AppState, Settings, CHUNK_SIZE};
+use crate::core::state::{AppState};
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 
@@ -121,6 +121,10 @@ pub struct Mob {
     pub alert_look_timer: f32,
 
     pub legs: Vec<Entity>,
+
+    /// Время, проведённое без игрока в радиусе 32 блоков.
+    /// Если превышает 30 секунд — моб может быть удалён случайно.
+    pub despawn_timer: f32,
 }
 
 impl Mob {
@@ -145,6 +149,7 @@ impl Mob {
             alert_walking: false,
             alert_look_timer: 0.0,
             legs: Vec::new(),
+            despawn_timer: 0.0,
         }
     }
 }
@@ -161,50 +166,83 @@ impl Plugin for MobAiPlugin {
                 unstuck_mobs,
                 mob_leg_animation_system,
                 despawn_dead_mobs,
+                despawn_distant_mobs,
             )
                 .chain()
                 .run_if(in_state(AppState::InGame)),
-        )
-        .add_systems(
-            Update,
-            update_mob_visibility.run_if(in_state(AppState::InGame)),
         );
         info!("MobAiPlugin loaded.");
     }
 }
 
-/// Скрывает мобов за пределами зоны рендера чанков, чтобы они
-/// не «висели в воздухе» над невидимой землёй.
-fn update_mob_visibility(
-    settings: Res<Settings>,
+/// Мировое расстояние, за которым моб удаляется мгновенно.
+const INSTANT_DESPAWN_DISTANCE: f32 = 128.0;
+
+/// Мировое расстояние, ближе которого таймер деспавна сбрасывается.
+const DESPAWN_SAFE_DISTANCE: f32 = 32.0;
+
+/// Сколько секунд моб должен быть без игрока рядом,
+/// чтобы начать случайный деспавн.
+const RANDOM_DESPAWN_TIME: f32 = 30.0;
+
+/// Шанс деспавна за один игровой тик (1/20 секунды).
+/// В среднем моб существует ~40 секунд после начала проверки.
+const RANDOM_DESPAWN_CHANCE_PER_TICK: f32 = 1.0 / 800.0;
+
+/// Удаляет мобов по правилам Minecraft:
+///   • Мгновенно, если нет игрока в радиусе 128 блоков.
+///   • С шансом 1/800 за тик, если моб находится в 32-128 блоках
+///     от игрока дольше 30 секунд.
+fn despawn_distant_mobs(
+    time: Res<Time>,
     player_q: Query<&Transform, With<Player>>,
-    mut q: Query<(&Transform, &mut Visibility), With<Mob>>,
+    mut mob_q: Query<(Entity, &Transform, &mut Mob)>,
+    mut commands: Commands,
+    mut rng_state: Local<u32>,
 ) {
     let Ok(pt) = player_q.single() else { return; };
-    let px = pt.translation.x;
-    let pz = pt.translation.z;
+    let player_pos = pt.translation;
+    let dt = time.delta_secs();
 
-    // Чуть меньше границы чанков, чтобы мобы не мигали на самой
-    // кромке. Скажем, (rd - 0.5) * 16 = rd*16 - 8 блоков.
-    let rd_blocks = (settings.render_distance_chunks as f32 - 0.5)
-        * CHUNK_SIZE as f32;
-    let rd_sq = rd_blocks * rd_blocks;
+    // Приблизительно: сколько игровых тиков прошло за этот кадр.
+    // 20 тиков в секунду.
+    let ticks_elapsed = dt * 20.0;
 
-    for (tf, mut vis) in q.iter_mut() {
-        let dx = tf.translation.x - px;
-        let dz = tf.translation.z - pz;
-        let d_sq = dx * dx + dz * dz;
+    for (entity, tf, mut mob) in mob_q.iter_mut() {
+        let dist = tf.translation.distance(player_pos);
 
-        let new_vis = if d_sq <= rd_sq {
-            Visibility::Visible
+        // Мгновенный деспавн: слишком далеко от игрока.
+        if dist > INSTANT_DESPAWN_DISTANCE {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // Обновляем таймер "без игрока рядом".
+        if dist > DESPAWN_SAFE_DISTANCE {
+            mob.despawn_timer += dt;
         } else {
-            Visibility::Hidden
-        };
+            mob.despawn_timer = 0.0;
+        }
 
-        if *vis != new_vis {
-            *vis = new_vis;
+        // Случайный деспавн: моб далеко от игрока достаточно долго.
+        if mob.despawn_timer > RANDOM_DESPAWN_TIME {
+            // Шанс за кадр = шанс_за_тик * тиков_за_кадр.
+            // Для типичного кадра 60 FPS: 0.33 тика.
+            let chance = RANDOM_DESPAWN_CHANCE_PER_TICK * ticks_elapsed;
+            if lcg_f32(&mut rng_state) < chance {
+                commands.entity(entity).despawn();
+            }
         }
     }
+}
+
+#[inline]
+fn lcg_f32(state: &mut u32) -> f32 {
+    if *state == 0 {
+        *state = 0x9E37_79B9;
+    }
+    *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+    ((*state >> 16) as u16 as f32) / 65535.0
 }
 
 fn mob_collides(world: &WorldData, px: f32, py: f32, pz: f32, r: f32, h: f32) -> bool {

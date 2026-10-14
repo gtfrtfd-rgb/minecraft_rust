@@ -54,7 +54,7 @@ impl Plugin for SettingsPlugin {
     }
 }
 
-fn settings_path() -> PathBuf {
+pub fn settings_path() -> PathBuf {
     let mut p = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|p| p.to_path_buf()))
@@ -117,15 +117,9 @@ macro_rules! settings_row {
             .with_children(|row| {
                 row.spawn((
                     Text::new($label),
-                    TextFont {
-                        font_size: FontSize::Px(20.0),
-                        ..default()
-                    },
+                    TextFont { font_size: FontSize::Px(20.0), ..default() },
                     TextColor(Color::WHITE),
-                    Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    },
+                    Node { flex_grow: 1.0, ..default() },
                 ));
 
                 row.spawn((
@@ -146,25 +140,16 @@ macro_rules! settings_row {
                 .with_children(|b| {
                     b.spawn((
                         Text::new("-"),
-                        TextFont {
-                            font_size: FontSize::Px(24.0),
-                            ..default()
-                        },
+                        TextFont { font_size: FontSize::Px(24.0), ..default() },
                         TextColor(Color::WHITE),
                     ));
                 });
 
                 row.spawn((
                     Text::new("--"),
-                    TextFont {
-                        font_size: FontSize::Px(20.0),
-                        ..default()
-                    },
+                    TextFont { font_size: FontSize::Px(20.0), ..default() },
                     TextColor(Color::srgb(0.85, 0.95, 0.65)),
-                    Node {
-                        width: Val::Px(180.0),
-                        ..default()
-                    },
+                    Node { width: Val::Px(150.0), ..default() },
                     SettingValueText($field),
                 ));
 
@@ -186,10 +171,7 @@ macro_rules! settings_row {
                 .with_children(|b| {
                     b.spawn((
                         Text::new("+"),
-                        TextFont {
-                            font_size: FontSize::Px(24.0),
-                            ..default()
-                        },
+                        TextFont { font_size: FontSize::Px(24.0), ..default() },
                         TextColor(Color::WHITE),
                     ));
                 });
@@ -218,17 +200,11 @@ fn spawn_settings_menu(mut commands: Commands) {
         .with_children(|root| {
             root.spawn((
                 Text::new("SETTINGS"),
-                TextFont {
-                    font_size: FontSize::Px(52.0),
-                    ..default()
-                },
+                TextFont { font_size: FontSize::Px(52.0), ..default() },
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
             ));
 
-            root.spawn(Node {
-                height: Val::Px(16.0),
-                ..default()
-            });
+            root.spawn(Node { height: Val::Px(16.0), ..default() });
 
             settings_row!(root, SettingsField::MasterVolume,     "Master Volume");
             settings_row!(root, SettingsField::MouseSensitivity, "Mouse Sensitivity");
@@ -237,17 +213,40 @@ fn spawn_settings_menu(mut commands: Commands) {
             settings_row!(root, SettingsField::VSync,            "VSync");
             settings_row!(root, SettingsField::Resolution,       "Resolution");
 
-            root.spawn(Node {
-                height: Val::Px(20.0),
-                ..default()
+            root.spawn(Node { height: Val::Px(20.0), ..default() });
+
+            // Кнопка CONTROLS — переход в отдельный экран биндов.
+            root.spawn((
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(340.0),
+                    height: Val::Px(48.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(BTN_NORMAL),
+                BorderColor::all(BORDER_NORMAL),
+                crate::ui::menu::MenuAction::OpenKeybinds,
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    Text::new("CONTROLS"),
+                    TextFont { font_size: FontSize::Px(24.0), ..default() },
+                    TextColor(Color::WHITE),
+                ));
             });
+
+            root.spawn(Node { height: Val::Px(10.0), ..default() });
 
             root.spawn((
                 Button,
                 Interaction::default(),
                 Node {
                     width: Val::Px(340.0),
-                    height: Val::Px(52.0),
+                    height: Val::Px(48.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
@@ -260,10 +259,7 @@ fn spawn_settings_menu(mut commands: Commands) {
             .with_children(|b| {
                 b.spawn((
                     Text::new("BACK"),
-                    TextFont {
-                        font_size: FontSize::Px(26.0),
-                        ..default()
-                    },
+                    TextFont { font_size: FontSize::Px(24.0), ..default() },
                     TextColor(Color::WHITE),
                 ));
             });
@@ -274,9 +270,7 @@ fn toggle_settings_visibility(
     state: Res<State<AppState>>,
     mut q: Query<&mut Node, With<SettingsRoot>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
+    if !state.is_changed() { return; }
     let visible = *state.get() == AppState::Settings;
     for mut n in q.iter_mut() {
         n.display = if visible { Display::Flex } else { Display::None };
@@ -292,9 +286,7 @@ fn handle_settings_buttons(
     >,
     mut settings: ResMut<Settings>,
 ) {
-    if *state.get() != AppState::Settings {
-        return;
-    }
+    if *state.get() != AppState::Settings { return; }
 
     for (interaction, button, mut bg, mut border) in q.iter_mut() {
         match *interaction {
@@ -338,8 +330,7 @@ fn apply_delta(
         SettingsField::FpsLimit => {
             let step = dir.signum() as i32;
             let len = FPS_OPTIONS.len() as i32;
-            let new_idx = (settings.fps_limit_idx as i32 + step)
-                .clamp(0, len - 1);
+            let new_idx = (settings.fps_limit_idx as i32 + step).clamp(0, len - 1);
             settings.fps_limit_idx = new_idx as usize;
         }
         SettingsField::VSync => {
@@ -347,10 +338,8 @@ fn apply_delta(
         }
         SettingsField::Resolution => {
             let step = dir.signum() as i32;
-            let max_idx = max_resolution_idx
-                .min(RESOLUTION_OPTIONS.len() - 1) as i32;
-            let new_idx = (settings.resolution_idx as i32 + step)
-                .clamp(0, max_idx);
+            let max_idx = max_resolution_idx.min(RESOLUTION_OPTIONS.len() - 1) as i32;
+            let new_idx = (settings.resolution_idx as i32 + step).clamp(0, max_idx);
             settings.resolution_idx = new_idx as usize;
         }
     }
@@ -361,9 +350,7 @@ fn update_setting_texts(
     max_res: Res<MaxResolutionIndex>,
     mut q: Query<(&SettingValueText, &mut Text)>,
 ) {
-    if !settings.is_changed() && !max_res.is_changed() {
-        return;
-    }
+    if !settings.is_changed() && !max_res.is_changed() { return; }
     for (field, mut text) in q.iter_mut() {
         text.0 = match field.0 {
             SettingsField::MasterVolume => {
@@ -375,16 +362,13 @@ fn update_setting_texts(
             SettingsField::RenderDistance => {
                 format!("{}", settings.render_distance_chunks)
             }
-            SettingsField::FpsLimit => {
-                format!("{}", settings.fps_limit())
-            }
+            SettingsField::FpsLimit => format!("{}", settings.fps_limit()),
             SettingsField::VSync => {
                 if settings.vsync { "On".into() } else { "Off".into() }
             }
             SettingsField::Resolution => {
                 let (w, h) = settings.resolution();
                 if settings.resolution_idx >= max_res.0 {
-                    // Нативный размер — окно развернётся в fullscreen.
                     format!("{}x{} (full)", w, h)
                 } else {
                     format!("{}x{}", w, h)

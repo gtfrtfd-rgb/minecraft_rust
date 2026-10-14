@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use crate::core::state::AppState;
+use crate::core::state::{AppState, RebindingState};
 
 #[derive(Component)]
 struct MainMenuRoot;
@@ -13,6 +13,8 @@ struct PauseMenuRoot;
 pub enum MenuAction {
     Play,
     Settings,
+    OpenKeybinds,
+    ExitToSettings,
     Resume,
     ExitToMenu,
     ExitGame,
@@ -39,8 +41,6 @@ impl Plugin for MenuPlugin {
     }
 }
 
-/// Спавнит кнопку. Четвёртый аргумент — отступы (margin),
-/// с помощью которых раньше делали spacer-ноды.
 macro_rules! menu_button {
     ($parent:expr, $action:expr, $label:expr, $margin:expr) => {
         $parent
@@ -63,10 +63,7 @@ macro_rules! menu_button {
             .with_children(|b| {
                 b.spawn((
                     Text::new($label),
-                    TextFont {
-                        font_size: FontSize::Px(30.0),
-                        ..default()
-                    },
+                    TextFont { font_size: FontSize::Px(30.0), ..default() },
                     TextColor(Color::WHITE),
                 ));
             });
@@ -97,15 +94,10 @@ fn spawn_menus(mut commands: Commands) {
         .with_children(|root| {
             root.spawn((
                 Text::new("MINECRAFT RUST"),
-                TextFont {
-                    font_size: FontSize::Px(82.0),
-                    ..default()
-                },
+                TextFont { font_size: FontSize::Px(82.0), ..default() },
                 TextColor(Color::srgb(0.55, 0.85, 0.55)),
             ));
 
-            // PLAY отделён от заголовка 50 px margin'ом — раньше
-            // для этого был пустой spacer-нод.
             menu_button!(root, MenuAction::Play,     "PLAY",     UiRect::top(Val::Px(50.0)));
             menu_button!(root, MenuAction::Settings, "SETTINGS", UiRect::ZERO);
             menu_button!(root, MenuAction::ExitGame, "EXIT",     UiRect::ZERO);
@@ -132,10 +124,7 @@ fn spawn_menus(mut commands: Commands) {
         .with_children(|root| {
             root.spawn((
                 Text::new("PAUSED"),
-                TextFont {
-                    font_size: FontSize::Px(72.0),
-                    ..default()
-                },
+                TextFont { font_size: FontSize::Px(72.0), ..default() },
                 TextColor(Color::WHITE),
             ));
 
@@ -143,13 +132,9 @@ fn spawn_menus(mut commands: Commands) {
             menu_button!(root, MenuAction::ExitToMenu, "EXIT TO MENU", UiRect::ZERO);
             menu_button!(root, MenuAction::ExitGame,   "QUIT GAME",    UiRect::ZERO);
 
-            // Подсказка снизу — margin вместо третьего spacer'а.
             root.spawn((
                 Text::new("Press ESC to resume"),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
+                TextFont { font_size: FontSize::Px(14.0), ..default() },
                 TextColor(Color::srgba(1.0, 1.0, 1.0, 0.5)),
                 Node {
                     margin: UiRect::top(Val::Px(30.0)),
@@ -164,9 +149,7 @@ fn toggle_menu_visibility(
     mut main_q:  Query<&mut Node, (With<MainMenuRoot>,  Without<PauseMenuRoot>)>,
     mut pause_q: Query<&mut Node, (With<PauseMenuRoot>, Without<MainMenuRoot>)>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
+    if !state.is_changed() { return; }
 
     let show_main  = *state.get() == AppState::Menu;
     let show_pause = *state.get() == AppState::Paused;
@@ -191,19 +174,21 @@ fn handle_menu_buttons(
         match *interaction {
             Interaction::Pressed => match action {
                 MenuAction::Play | MenuAction::Resume => {
-                    info!("Menu action: Play / Resume");
                     next_state.set(AppState::InGame);
                 }
                 MenuAction::Settings => {
-                    info!("Menu action: Open settings");
+                    next_state.set(AppState::Settings);
+                }
+                MenuAction::OpenKeybinds => {
+                    next_state.set(AppState::Keybinds);
+                }
+                MenuAction::ExitToSettings => {
                     next_state.set(AppState::Settings);
                 }
                 MenuAction::ExitToMenu => {
-                    info!("Menu action: Exit to menu");
                     next_state.set(AppState::Menu);
                 }
                 MenuAction::ExitGame => {
-                    info!("Menu action: Quit game");
                     exit.write(AppExit::Success);
                 }
             },
@@ -222,27 +207,29 @@ fn handle_menu_buttons(
 fn handle_escape_key(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<AppState>>,
+    rebinding: Res<RebindingState>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    if !keys.just_pressed(KeyCode::Escape) {
-        return;
-    }
+    if !keys.just_pressed(KeyCode::Escape) { return; }
 
     match state.get() {
         AppState::InGame => {
-            info!("Escape -> Paused");
             next_state.set(AppState::Paused);
         }
         AppState::Paused => {
-            info!("Escape -> InGame");
             next_state.set(AppState::InGame);
         }
         AppState::Settings => {
-            info!("Escape -> Menu");
             next_state.set(AppState::Menu);
         }
-        AppState::Menu => {
+        AppState::Keybinds => {
+            // Обрабатывается в keybinds.rs — здесь не вмешиваемся,
+            // если ждём переназначение.
+            if rebinding.action.is_none() {
+                // ничего — keybinds сам обработает
+            }
         }
+        AppState::Menu => {}
     }
 }
 
@@ -250,15 +237,14 @@ fn update_cursor_for_state(
     state: Res<State<AppState>>,
     mut cursor_q: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
+    if !state.is_changed() { return; }
 
     let (visible, mode) = match state.get() {
         AppState::InGame   => (false, CursorGrabMode::Confined),
         AppState::Paused   => (true,  CursorGrabMode::None),
         AppState::Menu     => (true,  CursorGrabMode::None),
         AppState::Settings => (true,  CursorGrabMode::None),
+        AppState::Keybinds => (true,  CursorGrabMode::None),
     };
 
     for mut cursor in cursor_q.iter_mut() {
