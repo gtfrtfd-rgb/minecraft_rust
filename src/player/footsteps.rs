@@ -18,6 +18,12 @@ const MIN_SPEED: f32 = 0.5;
 const MIN_AIRBORNE_TIME: f32 = 0.15;
 const HARD_LANDING_TIME: f32 = 0.45;
 
+/// Скорость падения, ниже которой считаем, что игрок реально падал,
+/// а не «дрожал на границе» прыжка. -2.0 м/с = ~0.2 сек свободного
+/// падения — более чем достаточно, чтобы не сработать на сглаживании
+/// гравитации в одном кадре.
+const FALL_SPEED_THRESHOLD: f32 = -2.0;
+
 pub struct FootstepsPlugin;
 
 impl Plugin for FootstepsPlugin {
@@ -47,21 +53,36 @@ fn footsteps_system(
     mut last_pos: Local<Vec3>,
     mut step_timer: Local<f32>,
     mut airborne_time: Local<f32>,
+    mut last_velocity_y: Local<f32>,
     mut rng_state: Local<u32>,
 ) {
     let dt = time.delta_secs().max(0.0001);
     let Ok((tf, player)) = player_q.single() else { return; };
 
     let pos = tf.translation;
-
-    if player.fly || !player.on_ground {
-        *airborne_time += dt;
-        *last_pos = pos;
-        return;
-    }
-
-    let just_landed = *airborne_time > MIN_AIRBORNE_TIME;
+    let vy = player.velocity.y;
     let master = settings.master_volume;
+
+    // «На земле» с точки зрения footsteps: не в полёте и on_ground.
+    // При bunny-hop on_ground сбрасывается в false в том же кадре,
+    // поэтому поймать это через флаг невозможно — см. ниже.
+    let on_ground = !player.fly && player.on_ground;
+
+    // Приземление может проявиться двумя способами:
+    //
+    // 1. Нормальное: игрок on_ground, в воздухе был достаточно долго.
+    //    (медленный прыжок, падение с высоты)
+    //
+    // 2. Bunny-hop: игрок в этом кадре снова прыгнул — velocity.y
+    //    стала положительной, хотя в прошлом кадре была сильно
+    //    отрицательной. Значит между кадрами было касание земли.
+    let landed_normally = on_ground && *airborne_time > MIN_AIRBORNE_TIME;
+    let landed_bunny = !on_ground
+        && vy > 0.0
+        && *last_velocity_y < FALL_SPEED_THRESHOLD
+        && *airborne_time > MIN_AIRBORNE_TIME;
+
+    let just_landed = landed_normally || landed_bunny;
 
     if just_landed {
         *step_timer = 0.0;
@@ -86,19 +107,33 @@ fn footsteps_system(
                     commands.spawn((
                         AudioPlayer(handle),
                         PlaybackSettings::DESPAWN
-                            .with_volume(Volume::Linear(LANDING_VOLUME * vol_scale * master))
+                            .with_volume(Volume::Linear(
+                                LANDING_VOLUME * vol_scale * master
+                            ))
                             .with_speed(LANDING_PITCH + pitch_jitter),
                     ));
                 }
             }
         }
     }
-    *airborne_time = 0.0;
+
+    // Обновляем трекеры.
+    if on_ground {
+        *airborne_time = 0.0;
+    } else {
+        *airborne_time += dt;
+    }
+    *last_velocity_y = vy;
+    *last_pos = pos;
+
+    // Обычные шаги — только если игрок реально на земле.
+    if !on_ground {
+        return;
+    }
 
     let dx = pos.x - last_pos.x;
     let dz = pos.z - last_pos.z;
     let horiz_speed = ((dx * dx + dz * dz).sqrt()) / dt;
-    *last_pos = pos;
 
     if horiz_speed < MIN_SPEED {
         *step_timer = 0.0;
