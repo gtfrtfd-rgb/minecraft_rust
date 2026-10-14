@@ -4,6 +4,8 @@ use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::RngExt;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 
 use crate::core::state::{SY, AppState, CHUNK_SIZE};
 use crate::world::chunk::WorldData;
@@ -468,48 +470,37 @@ fn spawn_cycle(
     mob_q: Query<&Transform, With<Mob>>,
     mut cycle_timer: Local<f32>,
     time: Res<Time>,
+    mut rng_local: Local<Option<SmallRng>>,
 ) {
     let Some(assets) = assets else { return; };
     let Ok(pt) = player_q.single() else { return; };
     let player_pos = pt.translation;
 
-    // Цикл спавна.
     *cycle_timer += time.delta_secs();
     if *cycle_timer < SPAWN_CYCLE_INTERVAL { return; }
     *cycle_timer = 0.0;
 
-    // Считаем мобов в радиусе 128 блоков.
     let nearby = mob_q
         .iter()
         .filter(|tf| tf.translation.distance(player_pos) <= MAX_SPAWN_DISTANCE)
         .count();
 
+    // Если лимит достигнут — цикл пропускается.
     if nearby >= PASSIVE_MOB_CAP { return; }
 
-    let mut rng = rand::rng();
+    let rng = rng_local.get_or_insert_with(|| SmallRng::seed_from_u64(0x5EED_5EED_5EED_5EED));
     let types = [MobType::Pig, MobType::Sheep, MobType::Cow, MobType::Chicken];
 
     for _ in 0..SPAWN_ATTEMPTS_PER_CYCLE {
-        // Если после спавна стаи мы уже у лимита — выходим.
-        let current = mob_q.iter().count();
-        if nearby + current >= PASSIVE_MOB_CAP * 2 {
-            // грубая защита: не спавним больше в этом цикле,
-            // если как будто уже перебор.
-            break;
-        }
-
-        // Случайная точка в кольце 24–128 блоков от игрока.
         let angle = rng.random_range(0.0..std::f32::consts::TAU);
         let dist = rng.random_range(MIN_SPAWN_DISTANCE..MAX_SPAWN_DISTANCE);
         let wx = (player_pos.x + angle.cos() * dist).floor() as i32;
         let wz = (player_pos.z + angle.sin() * dist).floor() as i32;
 
-        // Чанк должен быть загружен.
         let cx = wx.div_euclid(CHUNK_SIZE);
         let cz = wz.div_euclid(CHUNK_SIZE);
         if !world.has_chunk(cx, cz) { continue; }
 
-        // Верхний solid-блок в этом столбце.
         let mut top_y: Option<i32> = None;
         for y in (1..SY - 1).rev() {
             if world.get(wx, y, wz).is_solid() {
@@ -520,7 +511,6 @@ fn spawn_cycle(
         let Some(ground_y) = top_y else { continue };
         let spawn_y = ground_y + 1;
 
-        // Над головой свободно.
         let mut sky_clear = true;
         for dy in 0..3 {
             if world.get(wx, spawn_y + dy, wz).is_solid() {
@@ -530,7 +520,6 @@ fn spawn_cycle(
         }
         if !sky_clear { continue; }
 
-        // Определяем тип и размер стаи.
         let mob_type = types[rng.random_range(0..types.len())];
         let pack_size = rng.random_range(PACK_SIZE_MIN..=PACK_SIZE_MAX);
 
@@ -541,24 +530,19 @@ fn spawn_cycle(
             MobType::Chicken => (assets.chicken_body.clone(), assets.chicken_leg.clone(), assets.chicken_mat.clone()),
         };
 
-        // Спавним стаю из pack_size мобов в радиусе PACK_RADIUS
-        // вокруг выбранной точки.
         let mut spawned_in_pack = 0usize;
         for _ in 0..pack_size * 3 {
             if spawned_in_pack >= pack_size { break; }
 
-            // Смещение внутри стаи.
             let ox = rng.random_range(-PACK_RADIUS..PACK_RADIUS);
             let oz = rng.random_range(-PACK_RADIUS..PACK_RADIUS);
             let mx = wx + ox.floor() as i32;
             let mz = wz + oz.floor() as i32;
 
-            // Тот же чанк должен быть загружен.
             let mcx = mx.div_euclid(CHUNK_SIZE);
             let mcz = mz.div_euclid(CHUNK_SIZE);
             if !world.has_chunk(mcx, mcz) { continue; }
 
-            // Ищем верхний solid-блок для новой позиции.
             let mut my: Option<i32> = None;
             for y in (1..SY - 1).rev() {
                 if world.get(mx, y, mz).is_solid() {
@@ -569,7 +553,6 @@ fn spawn_cycle(
             let Some(gy) = my else { continue };
             let sy = gy + 1;
 
-            // Над головой свободно.
             let mut ok = true;
             for dy in 0..3 {
                 if world.get(mx, sy + dy, mz).is_solid() {
@@ -594,14 +577,11 @@ fn spawn_cycle(
             spawned_in_pack += 1;
         }
 
-        // Одна успешная попытка — можно завершить цикл
-        // (в Minecraft тоже спавнят «пачкой» за один успешный тик).
         if spawned_in_pack > 0 {
             break;
         }
     }
 }
-
 fn mob_material(atlas: Handle<Image>) -> StandardMaterial {
     StandardMaterial {
         base_color: Color::WHITE,

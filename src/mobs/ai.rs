@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use rand::RngExt;
 
-use crate::core::state::{AppState};
+use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
 use crate::player::controller::Player;
 
@@ -122,8 +124,6 @@ pub struct Mob {
 
     pub legs: Vec<Entity>,
 
-    /// Время, проведённое без игрока в радиусе 32 блоков.
-    /// Если превышает 30 секунд — моб может быть удалён случайно.
     pub despawn_timer: f32,
 }
 
@@ -175,24 +175,11 @@ impl Plugin for MobAiPlugin {
     }
 }
 
-/// Мировое расстояние, за которым моб удаляется мгновенно.
 const INSTANT_DESPAWN_DISTANCE: f32 = 128.0;
-
-/// Мировое расстояние, ближе которого таймер деспавна сбрасывается.
 const DESPAWN_SAFE_DISTANCE: f32 = 32.0;
-
-/// Сколько секунд моб должен быть без игрока рядом,
-/// чтобы начать случайный деспавн.
 const RANDOM_DESPAWN_TIME: f32 = 30.0;
-
-/// Шанс деспавна за один игровой тик (1/20 секунды).
-/// В среднем моб существует ~40 секунд после начала проверки.
 const RANDOM_DESPAWN_CHANCE_PER_TICK: f32 = 1.0 / 800.0;
 
-/// Удаляет мобов по правилам Minecraft:
-///   • Мгновенно, если нет игрока в радиусе 128 блоков.
-///   • С шансом 1/800 за тик, если моб находится в 32-128 блоках
-///     от игрока дольше 30 секунд.
 fn despawn_distant_mobs(
     time: Res<Time>,
     player_q: Query<&Transform, With<Player>>,
@@ -204,30 +191,23 @@ fn despawn_distant_mobs(
     let player_pos = pt.translation;
     let dt = time.delta_secs();
 
-    // Приблизительно: сколько игровых тиков прошло за этот кадр.
-    // 20 тиков в секунду.
     let ticks_elapsed = dt * 20.0;
 
     for (entity, tf, mut mob) in mob_q.iter_mut() {
         let dist = tf.translation.distance(player_pos);
 
-        // Мгновенный деспавн: слишком далеко от игрока.
         if dist > INSTANT_DESPAWN_DISTANCE {
             commands.entity(entity).despawn();
             continue;
         }
 
-        // Обновляем таймер "без игрока рядом".
         if dist > DESPAWN_SAFE_DISTANCE {
             mob.despawn_timer += dt;
         } else {
             mob.despawn_timer = 0.0;
         }
 
-        // Случайный деспавн: моб далеко от игрока достаточно долго.
         if mob.despawn_timer > RANDOM_DESPAWN_TIME {
-            // Шанс за кадр = шанс_за_тик * тиков_за_кадр.
-            // Для типичного кадра 60 FPS: 0.33 тика.
             let chance = RANDOM_DESPAWN_CHANCE_PER_TICK * ticks_elapsed;
             if lcg_f32(&mut rng_state) < chance {
                 commands.entity(entity).despawn();
@@ -238,9 +218,7 @@ fn despawn_distant_mobs(
 
 #[inline]
 fn lcg_f32(state: &mut u32) -> f32 {
-    if *state == 0 {
-        *state = 0x9E37_79B9;
-    }
+    if *state == 0 { *state = 0x9E37_79B9; }
     *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
     ((*state >> 16) as u16 as f32) / 65535.0
 }
@@ -270,14 +248,14 @@ fn highest_solid(world: &WorldData, x: i32, z: i32) -> Option<i32> {
     (1..SY - 1).rev().find(|&y| world.get(x, y, z).is_solid())
 }
 
-
 fn mob_ai_think(
     time: Res<Time>,
     player_q: Query<&Transform, With<Player>>,
     mut q: Query<(&Transform, &mut Mob), Without<Player>>,
+    mut rng_local: Local<Option<SmallRng>>,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let mut rng = rand::rng();
+    let rng = rng_local.get_or_insert_with(|| SmallRng::seed_from_u64(0xC0FF_EE00_DEAD_BEEF));
 
     let player_pos = player_q.single().ok().map(|t| t.translation);
 
@@ -420,9 +398,10 @@ fn mob_movement_and_separation(
     world: Res<WorldData>,
     player_q: Query<&Transform, With<Player>>,
     mut q: Query<(Entity, &mut Transform, &mut Mob), Without<Player>>,
+    mut rng_local: Local<Option<SmallRng>>,
 ) {
     let dt = time.delta_secs().min(0.05);
-    let mut rng = rand::rng();
+    let rng = rng_local.get_or_insert_with(|| SmallRng::seed_from_u64(0xABCD_1234_5678_9F01));
     let player_pos = player_q.single().ok().map(|t| t.translation);
 
     let snapshots: Vec<(Entity, Vec3, f32)> = q
@@ -534,28 +513,33 @@ fn mob_movement_and_separation(
 
         tf.scale = Vec3::ONE;
 
-        let mut push_x = 0.0_f32;
-        let mut push_z = 0.0_f32;
-        let my_pos = tf.translation;
+        // Расталкивание применяется только когда моб движется.
+        // Иначе два стоящих в Idle моба будут медленно «уползать»
+        // друг от друга через полсекунды.
+        if allow_move {
+            let mut push_x = 0.0_f32;
+            let mut push_z = 0.0_f32;
+            let my_pos = tf.translation;
 
-        for (other_entity, other_pos, other_r) in snapshots.iter() {
-            if *other_entity == entity { continue; }
+            for (other_entity, other_pos, other_r) in snapshots.iter() {
+                if *other_entity == entity { continue; }
 
-            let dx = my_pos.x - other_pos.x;
-            let dz = my_pos.z - other_pos.z;
-            let dist_sq = dx * dx + dz * dz;
-            let min_dist = r + other_r + 0.15;
+                let dx = my_pos.x - other_pos.x;
+                let dz = my_pos.z - other_pos.z;
+                let dist_sq = dx * dx + dz * dz;
+                let min_dist = r + other_r + 0.15;
 
-            if dist_sq < min_dist * min_dist && dist_sq > 1e-6 {
-                let dist = dist_sq.sqrt();
-                let strength = (min_dist - dist) * 0.5;
-                push_x += (dx / dist) * strength;
-                push_z += (dz / dist) * strength;
+                if dist_sq < min_dist * min_dist && dist_sq > 1e-6 {
+                    let dist = dist_sq.sqrt();
+                    let strength = (min_dist - dist) * 0.5;
+                    push_x += (dx / dist) * strength;
+                    push_z += (dz / dist) * strength;
+                }
             }
-        }
 
-        tf.translation.x += push_x;
-        tf.translation.z += push_z;
+            tf.translation.x += push_x;
+            tf.translation.z += push_z;
+        }
 
         if allow_move && mob.on_ground {
             let dx = tf.translation.x - pos_before.x;

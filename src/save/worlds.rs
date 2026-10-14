@@ -57,7 +57,6 @@ fn slugify(name: &str) -> String {
     out
 }
 
-/// Создаёт новый файл мира. Возвращает путь к нему.
 pub fn create_world(name: &str) -> std::io::Result<PathBuf> {
     let dir = worlds_dir();
     fs::create_dir_all(&dir)?;

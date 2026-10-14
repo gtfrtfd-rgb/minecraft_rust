@@ -514,6 +514,7 @@ impl Plugin for ChunkPlugin {
         info!("ChunkPlugin loaded.");
     }
 }
+
 fn setup_chunk_render_assets(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -570,9 +571,23 @@ fn setup_chunk_render_assets(
     ));
 }
 
+/// Бюджет генерации в «стабильном» режиме — сколько новых чанков
+/// генерировать за кадр при движении.
 const STREAM_BUDGET_PER_FRAME: usize = 6;
 
+/// Бюджет генерации в «стартовом» режиме — первые 3 секунды после
+/// входа в игру. Загружаем быстро, но не всё сразу.
+const STREAM_BUDGET_STARTUP: usize = 24;
+
+/// Бюджет на самом первом кадре. Не `usize::MAX`, чтобы не
+/// фризить окно на несколько секунд при большом render distance.
+const STREAM_BUDGET_FIRST_FRAME: usize = 32;
+
+/// Длительность «стартовой» фазы (секунды).
+const STARTUP_PHASE: f32 = 3.0;
+
 fn stream_chunks(
+    time: Res<Time>,
     settings: Res<Settings>,
     seed: Res<WorldSeed>,
     mut world: ResMut<WorldData>,
@@ -581,6 +596,7 @@ fn stream_chunks(
     assets: Option<Res<ChunkRenderAssets>>,
     chunk_q: Query<(Entity, &ChunkMesh)>,
     player_q: Query<&Transform, With<Player>>,
+    mut startup_time: Local<f32>,
     mut initialized: Local<bool>,
 ) {
     let Some(assets) = assets else { return; };
@@ -595,8 +611,16 @@ fn stream_chunks(
     let rendered: std::collections::HashSet<IVec2> =
         chunk_q.iter().map(|(_, c)| c.coord).collect();
 
-    let first_run = !*initialized;
-    let budget = if first_run { usize::MAX } else { STREAM_BUDGET_PER_FRAME };
+    // Плавная загрузка вместо «фриза на первом кадре».
+    let budget = if !*initialized {
+        *initialized = true;
+        STREAM_BUDGET_FIRST_FRAME
+    } else if *startup_time < STARTUP_PHASE {
+        *startup_time += time.delta_secs();
+        STREAM_BUDGET_STARTUP
+    } else {
+        STREAM_BUDGET_PER_FRAME
+    };
 
     if budget > 0 {
         let fwd = pt.forward().as_vec3();
@@ -628,6 +652,7 @@ fn stream_chunks(
         }
     }
 
+    // Спавним меши для чанков в радиусе рендера.
     for dz in -rd..=rd {
         for dx in -rd..=rd {
             let cx = pcx + dx;
@@ -648,6 +673,7 @@ fn stream_chunks(
         }
     }
 
+    // Выгружаем меши за пределами радиуса рендера.
     for (entity, chunk) in chunk_q.iter() {
         let dx = (chunk.coord.x - pcx).abs();
         let dz = (chunk.coord.y - pcz).abs();
@@ -656,6 +682,7 @@ fn stream_chunks(
         }
     }
 
+    // Выгружаем из памяти чанки за пределами кэша.
     let mem_rd = rd + 4;
     let to_remove: Vec<IVec2> = world
         .chunks
@@ -666,8 +693,6 @@ fn stream_chunks(
     for k in to_remove {
         world.chunks.remove(&k);
     }
-
-    *initialized = true;
 }
 
 fn rebuild_dirty_chunks(
@@ -681,7 +706,10 @@ fn rebuild_dirty_chunks(
     dirty.0.sort_by_key(|c| (c.x, c.y));
     dirty.0.dedup();
 
+    // `std::mem::take` вместо `drain(..).collect()` — не аллоцирует
+    // новый вектор, а забирает старый.
     let coords: Vec<IVec2> = std::mem::take(&mut dirty.0);
+
     let t0 = std::time::Instant::now();
     let mut rebuilt = 0;
     let mut total_verts = 0usize;

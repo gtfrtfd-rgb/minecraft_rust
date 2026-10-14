@@ -52,7 +52,6 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Папка миров.
 pub fn worlds_dir() -> PathBuf {
     let mut p = data_dir();
     p.push("worlds");
@@ -181,19 +180,15 @@ pub struct WorldInfo {
     pub edits: usize,
 }
 
-/// Список миров, отсканированных из `worlds/`.
 #[derive(Resource, Default)]
 pub struct WorldsList(pub Vec<WorldInfo>);
 
-/// Индекс выбранного мира в списке.
 #[derive(Resource, Default)]
 pub struct SelectedWorldIdx(pub usize);
 
-/// Мир, который нужно загрузить при следующем входе в InGame.
 #[derive(Resource, Default)]
 pub struct PendingLoadWorld(pub Option<PathBuf>);
 
-/// Путь активного (загруженного) мира. Сохранения идут сюда.
 #[derive(Resource, Default)]
 pub struct ActiveWorld(pub Option<PathBuf>);
 
@@ -210,7 +205,6 @@ pub struct Settings {
     pub fps_limit_idx: usize,
     pub resolution_idx: usize,
     pub vsync: bool,
-    pub fullscreen: bool,
 
     pub key_forward: String,
     pub key_backward: String,
@@ -231,7 +225,6 @@ impl Default for Settings {
             fps_limit_idx: 1,
             resolution_idx: 0,
             vsync: true,
-            fullscreen: false,
             key_forward:  "KeyW".into(),
             key_backward: "KeyS".into(),
             key_left:     "KeyA".into(),
@@ -486,10 +479,19 @@ fn apply_vsync(
     }
 }
 
+/// Ограничение FPS через sleep.
+///
+/// ВАЖНО: не работает, если включён VSync — иначе получится
+/// «двойное ограничение» (VSync + наш sleep), что даёт дёрганый
+/// тайминг и «вязкое» управление. Пока VSync On — sleep пропускаем.
 fn apply_fps_limit(
     settings: Res<Settings>,
     time: Res<Time>,
 ) {
+    if settings.vsync {
+        return;
+    }
+
     let limit = settings.fps_limit();
     let target_dt = 1.0 / limit as f32;
     let frame_dt = time.delta_secs();
