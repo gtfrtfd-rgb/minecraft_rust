@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
-use bevy::window::{PrimaryWindow, Window, WindowResolution, PresentMode};
+use bevy::window::{
+    PrimaryWindow, Window, WindowResolution, WindowMode, WindowPosition,
+    PresentMode, Monitor, MonitorSelection,
+};
 use serde::{Serialize, Deserialize};
 use crate::world::chunk::BlockType;
 
@@ -22,13 +25,17 @@ pub enum AppState {
 }
 
 // ============================================================
-// СПИСКИ ВАРИАНТОВ ДЛЯ НАСТРОЕК
+// СПИСКИ ВАРИАНТОВ
 // ============================================================
 
-/// Варианты ограничения FPS. 0 = Unlimited.
-pub const FPS_OPTIONS: [u32; 9] = [30, 60, 90, 120, 144, 165, 180, 240, 0];
+/// Варианты ограничения FPS.
+pub const FPS_OPTIONS: [u32; 8] = [30, 60, 90, 120, 144, 165, 180, 240];
 
 /// Варианты разрешения окна (все 16:9).
+///
+/// Если пользователь выбирает вариант, совпадающий с физическим
+/// разрешением монитора, окно автоматически разворачивается
+/// в borderless fullscreen. Более низкие варианты — обычное окно.
 pub const RESOLUTION_OPTIONS: [(u32, u32); 5] = [
     (1280, 720),
     (1600, 900),
@@ -36,6 +43,19 @@ pub const RESOLUTION_OPTIONS: [(u32, u32); 5] = [
     (2560, 1440),
     (3840, 2160),
 ];
+
+/// Максимальный индекс в `RESOLUTION_OPTIONS`, который не превышает
+/// физическое разрешение самого большого монитора. Вычисляется
+/// один раз на старте.
+#[derive(Resource)]
+pub struct MaxResolutionIndex(pub usize);
+
+impl Default for MaxResolutionIndex {
+    fn default() -> Self {
+        // Пока монитор неизвестен — разрешаем всё.
+        Self(RESOLUTION_OPTIONS.len() - 1)
+    }
+}
 
 // ============================================================
 // НАСТРОЙКИ
@@ -49,8 +69,11 @@ pub struct Settings {
     pub render_distance_chunks: i32,
     pub fps_limit_idx: usize,
     pub resolution_idx: usize,
-    /// VSync: включён / выключен.
     pub vsync: bool,
+    /// Оставлено для обратной совместимости со старыми сейвами —
+    /// больше не используется в UI, режим окна определяется
+    /// автоматически по выбранному разрешению.
+    pub fullscreen: bool,
 }
 
 impl Default for Settings {
@@ -60,8 +83,11 @@ impl Default for Settings {
             mouse_sensitivity: 0.0022,
             render_distance_chunks: 12,
             fps_limit_idx: 1,       // 60
-            resolution_idx: 0,      // 1920×1080
+            // По умолчанию — 720p в окне. Если у монитора физическое
+            // разрешение тоже 720p — окно развернётся на весь экран.
+            resolution_idx: 0,
             vsync: true,
+            fullscreen: false,
         }
     }
 }
@@ -107,11 +133,13 @@ impl Plugin for GameStatePlugin {
             .init_resource::<PlayerLook>()
             .init_resource::<SelectedSlot>()
             .init_resource::<Settings>()
+            .init_resource::<MaxResolutionIndex>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
             .add_systems(Update, handle_slot_input.run_if(in_state(AppState::InGame)))
+            .add_systems(Update, compute_max_resolution)
             .add_systems(Last, (
-                apply_resolution,
+                apply_window,
                 apply_vsync,
                 apply_fps_limit,
             ));
@@ -119,23 +147,113 @@ impl Plugin for GameStatePlugin {
     }
 }
 
-/// Реактивно меняет разрешение окна.
-fn apply_resolution(
+/// Один раз вычисляет максимальный индекс в `RESOLUTION_OPTIONS`,
+/// который помещается на самый большой монитор. Использует
+/// **физическое** разрешение без вычетов — специально, чтобы
+/// пользователь мог выбрать нативное разрешение и получить
+/// fullscreen.
+fn compute_max_resolution(
+    mut commands: Commands,
+    mut done: Local<bool>,
+    monitor_q: Query<&Monitor>,
+    mut settings: ResMut<Settings>,
+) {
+    if *done { return; }
+
+    let monitors: Vec<&Monitor> = monitor_q.iter().collect();
+    if monitors.is_empty() { return; }
+
+    let mut max_w: u32 = 0;
+    let mut max_h: u32 = 0;
+    for m in &monitors {
+        let size = m.physical_size();
+        if (size.x as u64) * (size.y as u64) > (max_w as u64) * (max_h as u64) {
+            max_w = size.x;
+            max_h = size.y;
+        }
+    }
+
+    // Ищем самый большой вариант, который не превышает физическое.
+    let mut max_idx = 0;
+    for (i, &(w, h)) in RESOLUTION_OPTIONS.iter().enumerate() {
+        if w <= max_w && h <= max_h {
+            max_idx = i;
+        }
+    }
+
+    // Если сохранённое разрешение больше физического — откатываем
+    // до максимально доступного.
+    if settings.resolution_idx > max_idx {
+        settings.resolution_idx = max_idx;
+        info!(
+            "Resolution clamped to {}x{} (screen is {}x{})",
+            RESOLUTION_OPTIONS[max_idx].0, RESOLUTION_OPTIONS[max_idx].1,
+            max_w, max_h
+        );
+    }
+
+    commands.insert_resource(MaxResolutionIndex(max_idx));
+    *done = true;
+    info!(
+        "Max resolution index: {} ({}x{}), screen {}x{}",
+        max_idx,
+        RESOLUTION_OPTIONS[max_idx].0, RESOLUTION_OPTIONS[max_idx].1,
+        max_w, max_h
+    );
+}
+
+/// Применяет размер окна и режим. Одна система вместо двух.
+///
+/// Логика:
+///   • Если выбранное разрешение == физическое (индекс = максимуму) —
+///     окно разворачивается в borderless fullscreen. Разрешение
+///     игнорируется, размер окна = размер монитора, ничего не
+///     вылезает за границы.
+///   • Иначе — обычное окно с указанным разрешением, центрировано.
+fn apply_window(
     settings: Res<Settings>,
+    max_res: Res<MaxResolutionIndex>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if !settings.is_changed() {
+    if !settings.is_changed() && !max_res.is_changed() {
         return;
     }
+
+    let want_fullscreen = settings.resolution_idx >= max_res.0;
+
+    let desired_mode = if want_fullscreen {
+        WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
+    } else {
+        WindowMode::Windowed
+    };
+
     let (w, h) = settings.resolution();
+
     for mut win in window_q.iter_mut() {
-        let current_w = win.resolution.physical_width();
-        let current_h = win.resolution.physical_height();
-        if current_w == w && current_h == h {
-            continue;
+        let mode_changed = win.mode != desired_mode;
+        if mode_changed {
+            win.mode = desired_mode;
         }
-        win.resolution = WindowResolution::new(w, h);
-        info!("Window resolution set to {}x{}", w, h);
+
+        // Разрешение применяем только в оконном режиме — иначе
+        // оконный менеджер сам задаёт размер.
+        if !want_fullscreen {
+            let current_w = win.resolution.physical_width();
+            let current_h = win.resolution.physical_height();
+            if current_w != w || current_h != h {
+                win.resolution = WindowResolution::new(w, h);
+                info!("Window resolution set to {}x{}", w, h);
+            }
+            win.position = WindowPosition::Centered(MonitorSelection::Primary);
+        }
+
+        if mode_changed {
+            if want_fullscreen {
+                info!("Window mode: borderless fullscreen");
+            } else {
+                info!("Window mode: windowed");
+            }
+        }
     }
 }
 
@@ -163,20 +281,11 @@ fn apply_vsync(
 }
 
 /// Ограничение FPS через sleep в конце кадра.
-/// 0 = без ограничения.
-/// Работает независимо от VSync, но если VSync уже ограничивает,
-/// sleep будет коротким или нулевым.
 fn apply_fps_limit(
     settings: Res<Settings>,
     time: Res<Time>,
 ) {
     let limit = settings.fps_limit();
-    if limit == 0 {
-        return;
-    }
-    // Если VSync включён и целевой лимит выше частоты монитора —
-    // пусть VSync сам решает. Sleep всё равно сработает, если
-    // кадр получился быстрее целевого.
     let target_dt = 1.0 / limit as f32;
     let frame_dt = time.delta_secs();
     if frame_dt < target_dt {

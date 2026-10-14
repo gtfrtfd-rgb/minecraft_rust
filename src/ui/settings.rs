@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::core::state::{
-    AppState, Settings, FPS_OPTIONS, RESOLUTION_OPTIONS,
+    AppState, Settings, FPS_OPTIONS, RESOLUTION_OPTIONS, MaxResolutionIndex,
 };
 
 const BTN_NORMAL: Color   = Color::srgb(0.18, 0.26, 0.38);
@@ -21,8 +21,8 @@ enum SettingsField {
     MouseSensitivity,
     RenderDistance,
     FpsLimit,
-    Resolution,
     VSync,
+    Resolution,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -128,7 +128,6 @@ macro_rules! settings_row {
                     },
                 ));
 
-                // Минус
                 row.spawn((
                     Button,
                     Interaction::default(),
@@ -163,7 +162,7 @@ macro_rules! settings_row {
                     },
                     TextColor(Color::srgb(0.85, 0.95, 0.65)),
                     Node {
-                        width: Val::Px(150.0),
+                        width: Val::Px(180.0),
                         ..default()
                     },
                     SettingValueText($field),
@@ -286,6 +285,7 @@ fn toggle_settings_visibility(
 
 fn handle_settings_buttons(
     state: Res<State<AppState>>,
+    max_res: Res<MaxResolutionIndex>,
     mut q: Query<
         (&Interaction, &SettingsButton, &mut BackgroundColor, &mut BorderColor),
         (Changed<Interaction>, With<Button>),
@@ -299,7 +299,7 @@ fn handle_settings_buttons(
     for (interaction, button, mut bg, mut border) in q.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                apply_delta(&mut settings, button.field, button.delta);
+                apply_delta(&mut settings, button.field, button.delta, max_res.0);
             }
             Interaction::Hovered => {
                 *bg = BackgroundColor(BTN_HOVER);
@@ -313,7 +313,12 @@ fn handle_settings_buttons(
     }
 }
 
-fn apply_delta(settings: &mut Settings, field: SettingsField, dir: f32) {
+fn apply_delta(
+    settings: &mut Settings,
+    field: SettingsField,
+    dir: f32,
+    max_resolution_idx: usize,
+) {
     match field {
         SettingsField::MasterVolume => {
             let step = 0.05 * dir;
@@ -337,25 +342,26 @@ fn apply_delta(settings: &mut Settings, field: SettingsField, dir: f32) {
                 .clamp(0, len - 1);
             settings.fps_limit_idx = new_idx as usize;
         }
+        SettingsField::VSync => {
+            settings.vsync = !settings.vsync;
+        }
         SettingsField::Resolution => {
             let step = dir.signum() as i32;
-            let len = RESOLUTION_OPTIONS.len() as i32;
+            let max_idx = max_resolution_idx
+                .min(RESOLUTION_OPTIONS.len() - 1) as i32;
             let new_idx = (settings.resolution_idx as i32 + step)
-                .clamp(0, len - 1);
+                .clamp(0, max_idx);
             settings.resolution_idx = new_idx as usize;
-        }
-        SettingsField::VSync => {
-            // Toggle: любое нажатие (и +, и -) переключает.
-            settings.vsync = !settings.vsync;
         }
     }
 }
 
 fn update_setting_texts(
     settings: Res<Settings>,
+    max_res: Res<MaxResolutionIndex>,
     mut q: Query<(&SettingValueText, &mut Text)>,
 ) {
-    if !settings.is_changed() {
+    if !settings.is_changed() && !max_res.is_changed() {
         return;
     }
     for (field, mut text) in q.iter_mut() {
@@ -370,20 +376,19 @@ fn update_setting_texts(
                 format!("{}", settings.render_distance_chunks)
             }
             SettingsField::FpsLimit => {
-                let limit = settings.fps_limit();
-                if limit == 0 {
-                    "Unlimited".to_string()
-                } else {
-                    format!("{}", limit)
-                }
-            }
-            SettingsField::Resolution => {
-                // ASCII "x" — default font Bevy не имеет U+00D7.
-                let (w, h) = settings.resolution();
-                format!("{}x{}", w, h)
+                format!("{}", settings.fps_limit())
             }
             SettingsField::VSync => {
                 if settings.vsync { "On".into() } else { "Off".into() }
+            }
+            SettingsField::Resolution => {
+                let (w, h) = settings.resolution();
+                if settings.resolution_idx >= max_res.0 {
+                    // Нативный размер — окно развернётся в fullscreen.
+                    format!("{}x{} (full)", w, h)
+                } else {
+                    format!("{}x{}", w, h)
+                }
             }
         };
     }
