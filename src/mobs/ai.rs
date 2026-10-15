@@ -195,13 +195,12 @@ impl Default for MobSpatialGrid {
 }
 
 impl MobSpatialGrid {
+    /// Сбрасывает сетку перед заполнением в новом кадре.
+    /// HashMap::clear() сохраняет capacity, но удаляет все ключи —
+    /// это ключевое отличие от простого перебора values_mut().clear(),
+    /// который оставлял пустые ячейки и приводил к утечке памяти.
     pub fn clear(&mut self) {
-        // Не удаляем HashMap целиком — Vec'ы внутри переиспользуются,
-        // только очищаются. Это снижает количество аллокаций
-        // при частых обновлениях.
-        for v in self.cells.values_mut() {
-            v.clear();
-        }
+        self.cells.clear();
     }
 
     #[inline]
