@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 use super::chunk::{BlockType, ChunkData};
-use crate::core::state::{CHUNK_SIZE, SY};
+use crate::core::state::{WorldSeed, CHUNK_SIZE, SY};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Biome {
@@ -10,6 +10,50 @@ enum Biome {
     Desert,
     Snow,
     Mountain,
+}
+
+// ============================================================
+// КЭШ PERLIN
+// ============================================================
+//
+// Perlin::new() строит таблицу пермутаций (~256 байт) и заполняет
+// её через shuffle. Это недорого, но при 100+ чанках в секунду
+// (async генерация) суммарно получается заметная нагрузка.
+//
+// Кэшируем 4 Perlin'а (base / temp / humid / mount) в одном
+// ресурсе. При изменении seed (загрузка другого мира) — пересоздаём.
+//
+// Perlin реализует Copy, так что клонирование в задачу бесплатно.
+
+#[derive(Clone, Copy)]
+pub struct PerlinCache {
+    pub seed: u32,
+    pub base: Perlin,
+    pub temp: Perlin,
+    pub humid: Perlin,
+    pub mount: Perlin,
+}
+
+impl PerlinCache {
+    pub fn new(seed: u32) -> Self {
+        Self {
+            seed,
+            base: Perlin::new(seed),
+            temp: Perlin::new(seed.wrapping_add(300)),
+            humid: Perlin::new(seed.wrapping_add(400)),
+            mount: Perlin::new(seed.wrapping_add(500)),
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct PerlinCacheRes(pub PerlinCache);
+
+impl Default for PerlinCacheRes {
+    fn default() -> Self {
+        // Дефолт с сидом 0. Реальная инициализация — в init_perlin_cache.
+        Self(PerlinCache::new(0))
+    }
 }
 
 struct Rng {
@@ -31,21 +75,42 @@ impl Rng {
 pub struct WorldGeneratorPlugin;
 
 impl Plugin for WorldGeneratorPlugin {
-    fn build(&self, _app: &mut App) {
-        // Никаких систем — генерация вызывается из chunk::stream_chunks.
-        info!("WorldGeneratorPlugin loaded (per-chunk generation).");
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PerlinCacheRes>()
+            .add_systems(Startup, init_perlin_cache)
+            .add_systems(Update, update_perlin_cache);
+        info!("WorldGeneratorPlugin loaded (per-chunk generation, cached Perlin).");
     }
 }
 
-/// Генерирует один чанк (cx, cz) с данным сидом.
-/// Детерминирован: те же (seed, cx, cz) → тот же результат.
-pub fn generate_chunk(seed: u32, cx: i32, cz: i32) -> ChunkData {
+/// Создаёт кэш с настоящим сидом на старте.
+fn init_perlin_cache(
+    seed: Res<WorldSeed>,
+    mut cache: ResMut<PerlinCacheRes>,
+) {
+    cache.0 = PerlinCache::new(seed.0);
+    info!("Perlin cache initialized for seed {}", seed.0);
+}
+
+/// Пересоздаёт кэш при смене seed (загрузка другого мира).
+fn update_perlin_cache(
+    seed: Res<WorldSeed>,
+    mut cache: ResMut<PerlinCacheRes>,
+) {
+    if !seed.is_changed() { return; }
+    cache.0 = PerlinCache::new(seed.0);
+    info!("Perlin cache rebuilt for seed {}", seed.0);
+}
+
+/// Генерирует один чанк (cx, cz) с данным кэшем Perlin.
+/// Детерминирован: те же (cache, cx, cz) → тот же результат.
+pub fn generate_chunk(cache: &PerlinCache, cx: i32, cz: i32) -> ChunkData {
     let mut chunk = ChunkData::new();
 
-    let base_perlin = Perlin::new(seed);
-    let temp_noise  = Perlin::new(seed.wrapping_add(300));
-    let humid_noise = Perlin::new(seed.wrapping_add(400));
-    let mount_noise = Perlin::new(seed.wrapping_add(500));
+    let base_perlin = &cache.base;
+    let temp_noise  = &cache.temp;
+    let humid_noise = &cache.humid;
+    let mount_noise = &cache.mount;
 
     let base_x = cx * CHUNK_SIZE;
     let base_z = cz * CHUNK_SIZE;
@@ -134,11 +199,8 @@ pub fn generate_chunk(seed: u32, cx: i32, cz: i32) -> ChunkData {
         }
     }
 
-    // 3. Деревья. Генерируем только те, что полностью помещаются в чанк:
-    // ствол ставим в диапазон [3, 12], чтобы крона (радиус до 2) осталась
-    // внутри [0, 15]. Так на границах чанков деревья не «обрезаются»,
-    // но плотность немного ниже — визуально почти незаметно.
-    let chunk_seed = (seed as u64)
+    // 3. Деревья.
+    let chunk_seed = (cache.seed as u64)
         .wrapping_mul(0x9E37_79B9_7F4A_7C15)
         .wrapping_add((cx as i64 as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9))
         .wrapping_add((cz as i64 as u64).wrapping_mul(0x94D0_49BB_1331_11EB));
@@ -151,7 +213,6 @@ pub fn generate_chunk(seed: u32, cx: i32, cz: i32) -> ChunkData {
         let biome = biomes[lz][lx];
         let h = heights[lz][lx];
 
-        // Не сажаем на горах высоко и на песке.
         if biome == Biome::Desert { continue; }
         if biome == Biome::Mountain && h > 28 { continue; }
 
@@ -159,7 +220,6 @@ pub fn generate_chunk(seed: u32, cx: i32, cz: i32) -> ChunkData {
         let ok_top = matches!(top, BlockType::Grass | BlockType::Dirt | BlockType::Snow);
         if !ok_top { continue; }
 
-        // Не ставим дерево, если рядом уже есть ствол.
         let mut blocked = false;
         'outer: for dx in -2i32..=2 {
             for dz in -2i32..=2 {

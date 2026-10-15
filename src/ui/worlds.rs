@@ -298,10 +298,10 @@ fn capture_rename_input(
         if let Some(text) = ev.text.as_ref() {
             for c in text.chars() {
                 // Разрешаем только буквы, цифры, пробел, '_', '-'.
-                if c.is_alphanumeric() || c == ' ' || c == '_' || c == '-' {
-                    if state.draft.chars().count() < MAX_NAME_LEN {
-                        state.draft.push(c);
-                    }
+                                if (c.is_alphanumeric() || c == ' ' || c == '_' || c == '-')
+                    && state.draft.chars().count() < MAX_NAME_LEN
+                {
+                    state.draft.push(c);
                 }
             }
         }

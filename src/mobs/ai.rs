@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use rand::rngs::SmallRng;
 use rand::SeedableRng;
 use rand::RngExt;
+use std::collections::HashMap;
 
 use crate::core::state::AppState;
 use crate::world::chunk::WorldData;
@@ -154,23 +155,102 @@ impl Mob {
     }
 }
 
+// ============================================================
+// SPATIAL HASH ДЛЯ МОБОВ
+// ============================================================
+//
+// Разбивает мир на квадратную сетку (XZ). Для каждой ячейки
+// хранит список мобов, попавших в неё. При расталкивании моб
+// проверяет только 9 ячеек вокруг себя (свой + 8 соседних),
+// вместо того чтобы бегать по всему списку.
+//
+// При 30 мобах O(N²) — это 900 итераций в кадр, что не проблема.
+// Но при 200+ мобах это уже 40 000 итераций — spatial hash
+// снижает до ~O(N) за счёт локальности.
+//
+// cell_size = 4 блока достаточно: max радиус расталкивания
+// = r1 + r2 + 0.15 ≤ 1.05, с большим запасом.
+
+/// Один моб в spatial-хеше: entity, позиция, радиус.
+#[derive(Clone, Copy)]
+pub struct MobEntry {
+    pub entity: Entity,
+    pub pos: Vec3,
+    pub radius: f32,
+}
+
+#[derive(Resource)]
+pub struct MobSpatialGrid {
+    pub cells: HashMap<IVec2, Vec<MobEntry>>,
+    pub cell_size: f32,
+}
+
+impl Default for MobSpatialGrid {
+    fn default() -> Self {
+        Self {
+            cells: HashMap::new(),
+            cell_size: 4.0,
+        }
+    }
+}
+
+impl MobSpatialGrid {
+    pub fn clear(&mut self) {
+        // Не удаляем HashMap целиком — Vec'ы внутри переиспользуются,
+        // только очищаются. Это снижает количество аллокаций
+        // при частых обновлениях.
+        for v in self.cells.values_mut() {
+            v.clear();
+        }
+    }
+
+    #[inline]
+    pub fn key_for(&self, pos: Vec3) -> IVec2 {
+        IVec2::new(
+            (pos.x / self.cell_size).floor() as i32,
+            (pos.z / self.cell_size).floor() as i32,
+        )
+    }
+
+    pub fn insert(&mut self, entry: MobEntry) {
+        let key = self.key_for(entry.pos);
+        self.cells.entry(key).or_default().push(entry);
+    }
+
+    /// Возвращает всех мобов в 9 ячейках вокруг `pos` (свой + 8 соседей).
+    /// Записывает их в переданный `out` (переиспользуется между вызовами).
+    pub fn collect_neighbors(&self, pos: Vec3, out: &mut Vec<MobEntry>) {
+        out.clear();
+        let key = self.key_for(pos);
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if let Some(list) = self.cells.get(&IVec2::new(key.x + dx, key.y + dz)) {
+                    out.extend_from_slice(list);
+                }
+            }
+        }
+    }
+}
+
 pub struct MobAiPlugin;
 
 impl Plugin for MobAiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                mob_ai_think,
-                mob_movement_and_separation,
-                unstuck_mobs,
-                mob_leg_animation_system,
-                despawn_dead_mobs,
-                despawn_distant_mobs,
-            )
-                .chain()
-                .run_if(in_state(AppState::InGame)),
-        );
+        app.init_resource::<MobSpatialGrid>()
+            .add_systems(
+                Update,
+                (
+                    mob_ai_think,
+                    build_mob_spatial_grid,
+                    mob_movement_and_separation,
+                    unstuck_mobs,
+                    mob_leg_animation_system,
+                    despawn_dead_mobs,
+                    despawn_distant_mobs,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::InGame)),
+            );
         info!("MobAiPlugin loaded.");
     }
 }
@@ -393,21 +473,35 @@ fn mob_ai_think(
     }
 }
 
+/// Строит spatial hash мобов. Вызывается каждый кадр перед
+/// `mob_movement_and_separation`, чтобы система расталкивания
+/// могла искать соседей быстро.
+fn build_mob_spatial_grid(
+    mut grid: ResMut<MobSpatialGrid>,
+    mob_q: Query<(Entity, &Transform, &Mob)>,
+) {
+    grid.clear();
+    for (entity, tf, mob) in mob_q.iter() {
+        grid.insert(MobEntry {
+            entity,
+            pos: tf.translation,
+            radius: mob.mob_type.radius(),
+        });
+    }
+}
+
 fn mob_movement_and_separation(
     time: Res<Time>,
     world: Res<WorldData>,
     player_q: Query<&Transform, With<Player>>,
     mut q: Query<(Entity, &mut Transform, &mut Mob), Without<Player>>,
+    grid: Res<MobSpatialGrid>,
     mut rng_local: Local<Option<SmallRng>>,
+    mut neighbor_buf: Local<Vec<MobEntry>>,
 ) {
     let dt = time.delta_secs().min(0.05);
     let rng = rng_local.get_or_insert_with(|| SmallRng::seed_from_u64(0xABCD_1234_5678_9F01));
     let player_pos = player_q.single().ok().map(|t| t.translation);
-
-    let snapshots: Vec<(Entity, Vec3, f32)> = q
-        .iter()
-        .map(|(e, tf, mob)| (e, tf.translation, mob.mob_type.radius()))
-        .collect();
 
     for (entity, mut tf, mut mob) in q.iter_mut() {
         let r = mob.mob_type.radius();
@@ -513,21 +607,22 @@ fn mob_movement_and_separation(
 
         tf.scale = Vec3::ONE;
 
-        // Расталкивание применяется только когда моб движется.
-        // Иначе два стоящих в Idle моба будут медленно «уползать»
-        // друг от друга через полсекунды.
+        // Расталкивание через spatial hash: берём только мобов
+        // в 9 ячейках вокруг текущей позиции.
         if allow_move {
+            grid.collect_neighbors(tf.translation, &mut neighbor_buf);
+
             let mut push_x = 0.0_f32;
             let mut push_z = 0.0_f32;
             let my_pos = tf.translation;
 
-            for (other_entity, other_pos, other_r) in snapshots.iter() {
-                if *other_entity == entity { continue; }
+            for other in neighbor_buf.iter() {
+                if other.entity == entity { continue; }
 
-                let dx = my_pos.x - other_pos.x;
-                let dz = my_pos.z - other_pos.z;
+                let dx = my_pos.x - other.pos.x;
+                let dz = my_pos.z - other.pos.z;
                 let dist_sq = dx * dx + dz * dz;
-                let min_dist = r + other_r + 0.15;
+                let min_dist = r + other.radius + 0.15;
 
                 if dist_sq < min_dist * min_dist && dist_sq > 1e-6 {
                     let dist = dist_sq.sqrt();

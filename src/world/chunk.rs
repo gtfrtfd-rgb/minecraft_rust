@@ -5,13 +5,15 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::image::ImageSampler;
 use bevy::render::render_resource::Face;
 use bevy::light::GlobalAmbientLight;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::core::state::{
-    SY, CHUNK_SIZE, CHUNK_AREA, CHUNK_VOLUME, Settings, WorldSeed, AppState,
+    SY, CHUNK_SIZE, CHUNK_AREA, CHUNK_VOLUME, Settings, AppState,
 };
 use crate::player::controller::Player;
-use super::generator;
+use super::generator::{self, PerlinCacheRes};
 
 // ============================================================
 // БЛОКИ
@@ -163,12 +165,119 @@ impl ChunkData {
         self.blocks[Self::idx(lx, y, lz)]
     }
 
+    #[inline(always)]
+    pub fn get_local_fast(&self, lx: i32, y: i32, lz: i32) -> BlockType {
+        debug_assert!(y >= 0 && y < SY);
+        debug_assert!(lx >= 0 && lx < CHUNK_SIZE);
+        debug_assert!(lz >= 0 && lz < CHUNK_SIZE);
+        unsafe { *self.blocks.get_unchecked(Self::idx(lx, y, lz)) }
+    }
+
     #[inline]
     pub fn set_local(&mut self, lx: i32, y: i32, lz: i32, block: BlockType) {
         if y < 0 || y >= SY { return; }
         if lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE { return; }
         self.blocks[Self::idx(lx, y, lz)] = block;
     }
+}
+
+// ============================================================
+// СНИМОК ЧАНКА С «ХАЛО» ИЗ СОСЕДЕЙ
+// ============================================================
+//
+// Padded-массив размером 18 × SY × 18. Интерьер [1..17] × [1..17]
+// заполняется блоками самого чанка. Граничные полосы [0] и [17]
+// заполняются из соседних чанков (или Air, если соседа нет).
+//
+// Это позволяет строить меш полностью без обращений к WorldData —
+// значит, можно делать это в фоновом потоке, владея снимком.
+
+pub const PAD_SIZE: i32 = CHUNK_SIZE + 2; // 18
+pub const PAD_AREA: usize = (PAD_SIZE * PAD_SIZE) as usize;
+
+#[derive(Clone)]
+pub struct ChunkSnapshot {
+    pub coord: IVec2,
+    pub blocks: Vec<BlockType>,
+}
+
+impl ChunkSnapshot {
+    pub fn new(coord: IVec2) -> Self {
+        Self {
+            coord,
+            blocks: vec![BlockType::Air; PAD_AREA * SY as usize],
+        }
+    }
+
+    #[inline(always)]
+    fn idx(lx: i32, y: i32, lz: i32) -> usize {
+        let px = (lx + 1) as usize;
+        let pz = (lz + 1) as usize;
+        (y as usize) * PAD_AREA
+            + pz * (PAD_SIZE as usize)
+            + px
+    }
+
+    #[inline(always)]
+    pub fn get(&self, lx: i32, y: i32, lz: i32) -> BlockType {
+        if y < 0 || y >= SY { return BlockType::Air; }
+        if lx < -1 || lx > CHUNK_SIZE || lz < -1 || lz > CHUNK_SIZE {
+            return BlockType::Air;
+        }
+        unsafe { *self.blocks.get_unchecked(Self::idx(lx, y, lz)) }
+    }
+
+}
+
+/// Строит снимок чанка: интерьер + 4 боковые грани из соседей.
+fn build_snapshot(world: &WorldData, cx: i32, cz: i32) -> Option<ChunkSnapshot> {
+    let coord = IVec2::new(cx, cz);
+    let chunk = world.chunks.get(&coord)?;
+    let mut snap = ChunkSnapshot::new(coord);
+
+    // Интерьер — копируем блоки напрямую.
+    for y in 0..SY {
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let b = chunk.get_local_fast(lx, y, lz);
+                snap.blocks[ChunkSnapshot::idx(lx, y, lz)] = b;
+            }
+        }
+    }
+
+    // Верх / низ по Y не нужен — чанк один по высоте.
+
+    // 4 соседа.
+    let west  = world.chunks.get(&IVec2::new(cx - 1, cz));
+    let east  = world.chunks.get(&IVec2::new(cx + 1, cz));
+    let north = world.chunks.get(&IVec2::new(cx, cz - 1));
+    let south = world.chunks.get(&IVec2::new(cx, cz + 1));
+
+    for y in 0..SY {
+        for lz in 0..CHUNK_SIZE {
+            if let Some(w) = west {
+                snap.blocks[ChunkSnapshot::idx(-1, y, lz)] =
+                    w.get_local_fast(CHUNK_SIZE - 1, y, lz);
+            }
+            if let Some(e) = east {
+                snap.blocks[ChunkSnapshot::idx(CHUNK_SIZE, y, lz)] =
+                    e.get_local_fast(0, y, lz);
+            }
+        }
+        for lx in 0..CHUNK_SIZE {
+            if let Some(n) = north {
+                snap.blocks[ChunkSnapshot::idx(lx, y, -1)] =
+                    n.get_local_fast(lx, y, CHUNK_SIZE - 1);
+            }
+            if let Some(s) = south {
+                snap.blocks[ChunkSnapshot::idx(lx, y, CHUNK_SIZE)] =
+                    s.get_local_fast(lx, y, 0);
+            }
+        }
+    }
+
+    // Углы пэддинга не нужны для face-culling.
+    Some(snap)
 }
 
 // ============================================================
@@ -268,6 +377,36 @@ impl DirtyChunks {
         if near_max_x && near_max_z { self.0.push(IVec2::new(cx + 1, cz + 1)); }
     }
 }
+
+// ============================================================
+// АСИНХРОННЫЕ ЗАДАЧИ
+// ============================================================
+pub struct PendingChunkTask {
+    pub coord: IVec2,
+    pub task: Task<ChunkData>,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingChunks {
+    pub tasks: Vec<PendingChunkTask>,
+}
+
+pub struct PendingMeshTask {
+    pub coord: IVec2,
+    pub task: Task<Mesh>,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingMeshes {
+    pub tasks: Vec<PendingMeshTask>,
+}
+
+// Бюджеты и лимиты.
+const MAX_GEN_IN_FLIGHT: usize = 32;
+const MAX_MESH_IN_FLIGHT: usize = 16;
+const TASKS_SPAWN_PER_FRAME: usize = 6;
+const MESH_TASKS_PER_FRAME: usize = 8;
+const SYNC_STARTUP_RADIUS: i32 = 1;
 
 // ============================================================
 // АТЛАС ТЕКСТУР
@@ -431,27 +570,40 @@ const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
     ([0, 0, -1], [[1.0,0.0,0.0],[0.0,0.0,0.0],[0.0,1.0,0.0],[1.0,1.0,0.0]]),
 ];
 
-pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals:   Vec<[f32; 3]> = Vec::new();
-    let mut uvs:       Vec<[f32; 2]> = Vec::new();
-    let mut indices:   Vec<u32>      = Vec::new();
+/// Строит меш из снимка. Чистая функция без side-effects —
+/// можно вызывать в фоновом потоке.
+pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(4096);
+    let mut normals:   Vec<[f32; 3]> = Vec::with_capacity(4096);
+    let mut uvs:       Vec<[f32; 2]> = Vec::with_capacity(4096);
+    let mut indices:   Vec<u32>      = Vec::with_capacity(6144);
 
-    let x_start = cx * CHUNK_SIZE;
-    let z_start = cz * CHUNK_SIZE;
+    let x_start = snap.coord.x * CHUNK_SIZE;
+    let z_start = snap.coord.y * CHUNK_SIZE;
 
     for y in 0..SY {
         for lz in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
-                let x = x_start + lx;
-                let z = z_start + lz;
-                let block = world.get(x, y, z);
+                let block = snap.get(lx, y, lz);
                 if !block.is_solid() { continue; }
 
+                let x = x_start + lx;
+                let z = z_start + lz;
+
                 for (i, (dir, corners)) in FACES.iter().enumerate() {
-                    if world.is_solid(x + dir[0], y + dir[1], z + dir[2]) {
-                        continue;
-                    }
+                    let nlx = lx + dir[0];
+                    let ny = y + dir[1];
+                    let nlz = lz + dir[2];
+
+                    let solid = if ny < 0 {
+                        true
+                    } else if ny >= SY {
+                        false
+                    } else {
+                        snap.get(nlx, ny, nlz).is_solid()
+                    };
+                    if solid { continue; }
+
                     let tile = match i {
                         2 => block.top_tile(),
                         3 => block.bottom_tile(),
@@ -469,7 +621,10 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
                         normals.push([dir[0] as f32, dir[1] as f32, dir[2] as f32]);
                         uvs.push(tuv[j]);
                     }
-                    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+                    indices.extend_from_slice(&[
+                        base, base + 1, base + 2,
+                        base, base + 2, base + 3,
+                    ]);
                 }
             }
         }
@@ -481,6 +636,17 @@ pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// Синхронная версия — используется в rebuild_dirty_chunks.
+pub fn build_chunk_mesh(world: &WorldData, cx: i32, cz: i32) -> Mesh {
+    match build_snapshot(world, cx, cz) {
+        Some(snap) => build_mesh_from_snapshot(&snap),
+        None => {
+            let empty = ChunkSnapshot::new(IVec2::new(cx, cz));
+            build_mesh_from_snapshot(&empty)
+        }
+    }
 }
 
 #[derive(Component)]
@@ -506,6 +672,8 @@ impl Plugin for ChunkPlugin {
         })
         .insert_resource(WorldData::new())
         .init_resource::<DirtyChunks>()
+        .init_resource::<PendingChunks>()
+        .init_resource::<PendingMeshes>()
         .add_systems(Startup, setup_chunk_render_assets)
         .add_systems(PostUpdate, (
             stream_chunks.run_if(in_state(AppState::InGame)),
@@ -571,109 +739,134 @@ fn setup_chunk_render_assets(
     ));
 }
 
-/// Бюджет генерации в «стабильном» режиме — сколько новых чанков
-/// генерировать за кадр при движении.
-const STREAM_BUDGET_PER_FRAME: usize = 6;
-
-/// Бюджет генерации в «стартовом» режиме — первые 3 секунды после
-/// входа в игру. Загружаем быстро, но не всё сразу.
-const STREAM_BUDGET_STARTUP: usize = 24;
-
-/// Бюджет на самом первом кадре. Не `usize::MAX`, чтобы не
-/// фризить окно на несколько секунд при большом render distance.
-const STREAM_BUDGET_FIRST_FRAME: usize = 32;
-
-/// Длительность «стартовой» фазы (секунды).
-const STARTUP_PHASE: f32 = 3.0;
-
 fn stream_chunks(
-    time: Res<Time>,
     settings: Res<Settings>,
-    seed: Res<WorldSeed>,
+    perlin: Res<PerlinCacheRes>,
     mut world: ResMut<WorldData>,
+    mut pending_gen: ResMut<PendingChunks>,
+    mut pending_mesh: ResMut<PendingMeshes>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     assets: Option<Res<ChunkRenderAssets>>,
     chunk_q: Query<(Entity, &ChunkMesh)>,
     player_q: Query<&Transform, With<Player>>,
-    mut startup_time: Local<f32>,
-    mut initialized: Local<bool>,
 ) {
     let Some(assets) = assets else { return; };
     let Ok(pt) = player_q.single() else { return; };
 
     let pcx = (pt.translation.x.floor() as i32).div_euclid(CHUNK_SIZE);
     let pcz = (pt.translation.z.floor() as i32).div_euclid(CHUNK_SIZE);
-
     let rd = settings.render_distance_chunks;
     let load_rd = rd + 2;
 
-    let rendered: std::collections::HashSet<IVec2> =
-        chunk_q.iter().map(|(_, c)| c.coord).collect();
+    // Фаза 0: первый кадр — синхронная генерация 3×3.
+    let is_first_frame = world.chunks.is_empty();
+    if is_first_frame {
+        pending_gen.tasks.clear();
+        pending_mesh.tasks.clear();
 
-    // Плавная загрузка вместо «фриза на первом кадре».
-    let budget = if !*initialized {
-        *initialized = true;
-        STREAM_BUDGET_FIRST_FRAME
-    } else if *startup_time < STARTUP_PHASE {
-        *startup_time += time.delta_secs();
-        STREAM_BUDGET_STARTUP
-    } else {
-        STREAM_BUDGET_PER_FRAME
-    };
-
-    if budget > 0 {
-        let fwd = pt.forward().as_vec3();
-        let fwd_x = fwd.x;
-        let fwd_z = fwd.z;
-
-        let mut to_load: Vec<(f32, IVec2)> = Vec::new();
-        for dz in -load_rd..=load_rd {
-            for dx in -load_rd..=load_rd {
+        for dz in -SYNC_STARTUP_RADIUS..=SYNC_STARTUP_RADIUS {
+            for dx in -SYNC_STARTUP_RADIUS..=SYNC_STARTUP_RADIUS {
                 let cx = pcx + dx;
                 let cz = pcz + dz;
-                let key = IVec2::new(cx, cz);
-                if world.chunks.contains_key(&key) { continue; }
-                let fdx = dx as f32;
-                let fdz = dz as f32;
-                let dist_sq = fdx * fdx + fdz * fdz;
-                let dot = fdx * fwd_x + fdz * fwd_z;
-                let score = if dot > 0.0 { dist_sq } else { dist_sq * 3.0 };
-                to_load.push((score, key));
+                if world.has_chunk(cx, cz) { continue; }
+                let chunk = generator::generate_chunk(&perlin.0, cx, cz);
+                world.insert_chunk(cx, cz, chunk);
             }
         }
-        to_load.sort_by(|a, b| {
-            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
-        });
 
-        for (_, key) in to_load.into_iter().take(budget) {
-            let chunk = generator::generate_chunk(seed.0, key.x, key.y);
-            world.insert_chunk(key.x, key.y, chunk);
+        for dz in -SYNC_STARTUP_RADIUS..=SYNC_STARTUP_RADIUS {
+            for dx in -SYNC_STARTUP_RADIUS..=SYNC_STARTUP_RADIUS {
+                let key = IVec2::new(pcx + dx, pcz + dz);
+                let Some(snap) = build_snapshot(&world, key.x, key.y) else { continue; };
+                let mesh = build_mesh_from_snapshot(&snap);
+                let handle = meshes.add(mesh);
+                commands.spawn((
+                    Mesh3d(handle),
+                    MeshMaterial3d(assets.material.clone()),
+                    Transform::default(),
+                    ChunkMesh { coord: key },
+                    Name::new(format!("Chunk({}, {})", key.x, key.y)),
+                ));
+            }
         }
+        info!(
+            "Sync startup: {}×{} chunks",
+            SYNC_STARTUP_RADIUS * 2 + 1,
+            SYNC_STARTUP_RADIUS * 2 + 1
+        );
     }
 
-    // Спавним меши для чанков в радиусе рендера.
-    for dz in -rd..=rd {
+    // Фаза 1: поллинг задач генерации.
+    let mut done_gen: Vec<(IVec2, ChunkData)> = Vec::new();
+    pending_gen.tasks.retain_mut(|p| {
+        if let Some(chunk) = block_on(poll_once(&mut p.task)) {
+            done_gen.push((p.coord, chunk));
+            false
+        } else {
+            true
+        }
+    });
+
+    for (coord, chunk) in done_gen {
+        if world.chunks.contains_key(&coord) { continue; }
+        world.insert_chunk(coord.x, coord.y, chunk);
+    }
+
+    // Фаза 2: поллинг задач меша.
+    let rendered: HashSet<IVec2> =
+        chunk_q.iter().map(|(_, c)| c.coord).collect();
+
+    let mut done_mesh: Vec<(IVec2, Mesh)> = Vec::new();
+    pending_mesh.tasks.retain_mut(|p| {
+        if let Some(mesh) = block_on(poll_once(&mut p.task)) {
+            done_mesh.push((p.coord, mesh));
+            false
+        } else {
+            true
+        }
+    });
+
+    for (coord, mesh) in done_mesh {
+        if !world.has_chunk(coord.x, coord.y) { continue; }
+        if rendered.contains(&coord) { continue; }
+
+        let handle = meshes.add(mesh);
+        commands.spawn((
+            Mesh3d(handle),
+            MeshMaterial3d(assets.material.clone()),
+            Transform::default(),
+            ChunkMesh { coord },
+            Name::new(format!("Chunk({}, {})", coord.x, coord.y)),
+        ));
+    }
+
+    // Фаза 3: планируем задачи меша.
+    let pending_mesh_coords: HashSet<IVec2> =
+        pending_mesh.tasks.iter().map(|p| p.coord).collect();
+
+    let mut mesh_tasks_spawned = 0usize;
+    'mesh_schedule: for dz in -rd..=rd {
         for dx in -rd..=rd {
-            let cx = pcx + dx;
-            let cz = pcz + dz;
-            let key = IVec2::new(cx, cz);
-            if rendered.contains(&key) { continue; }
-            if !world.chunks.contains_key(&key) { continue; }
+            if mesh_tasks_spawned >= MESH_TASKS_PER_FRAME { break 'mesh_schedule; }
+            if pending_mesh.tasks.len() >= MAX_MESH_IN_FLIGHT { break 'mesh_schedule; }
 
-            let mesh = build_chunk_mesh(&world, cx, cz);
-            let handle = meshes.add(mesh);
-            commands.spawn((
-                Mesh3d(handle),
-                MeshMaterial3d(assets.material.clone()),
-                Transform::default(),
-                ChunkMesh { coord: key },
-                Name::new(format!("Chunk({}, {})", cx, cz)),
-            ));
+            let key = IVec2::new(pcx + dx, pcz + dz);
+            if rendered.contains(&key) { continue; }
+            if pending_mesh_coords.contains(&key) { continue; }
+            if !world.has_chunk(key.x, key.y) { continue; }
+
+            let Some(snap) = build_snapshot(&world, key.x, key.y) else { continue; };
+            let pool = AsyncComputeTaskPool::get();
+            let task = pool.spawn(async move {
+                build_mesh_from_snapshot(&snap)
+            });
+            pending_mesh.tasks.push(PendingMeshTask { coord: key, task });
+            mesh_tasks_spawned += 1;
         }
     }
 
-    // Выгружаем меши за пределами радиуса рендера.
+    // Фаза 4: выгружаем сущности-меши вне rd.
     for (entity, chunk) in chunk_q.iter() {
         let dx = (chunk.coord.x - pcx).abs();
         let dz = (chunk.coord.y - pcz).abs();
@@ -682,7 +875,7 @@ fn stream_chunks(
         }
     }
 
-    // Выгружаем из памяти чанки за пределами кэша.
+    // Фаза 5: выгружаем чанки из памяти вне mem_rd.
     let mem_rd = rd + 4;
     let to_remove: Vec<IVec2> = world
         .chunks
@@ -693,21 +886,70 @@ fn stream_chunks(
     for k in to_remove {
         world.chunks.remove(&k);
     }
-}
 
+    // Фаза 6: планируем новые задачи генерации.
+    if pending_gen.tasks.len() >= MAX_GEN_IN_FLIGHT { return; }
+
+    let in_flight: HashSet<IVec2> =
+        pending_gen.tasks.iter().map(|p| p.coord).collect();
+
+    let fwd = pt.forward().as_vec3();
+    let fwd_x = fwd.x;
+    let fwd_z = fwd.z;
+
+    let mut to_load: Vec<(f32, IVec2)> = Vec::with_capacity(64);
+    for dz in -load_rd..=load_rd {
+        for dx in -load_rd..=load_rd {
+            let key = IVec2::new(pcx + dx, pcz + dz);
+            if world.chunks.contains_key(&key) { continue; }
+            if in_flight.contains(&key) { continue; }
+
+            let fdx = dx as f32;
+            let fdz = dz as f32;
+            let dist_sq = fdx * fdx + fdz * fdz;
+            let dot = fdx * fwd_x + fdz * fwd_z;
+            let score = if dot > 0.0 { dist_sq } else { dist_sq * 3.0 };
+            to_load.push((score, key));
+        }
+    }
+    to_load.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let free_slots = MAX_GEN_IN_FLIGHT.saturating_sub(pending_gen.tasks.len());
+    let to_spawn = free_slots.min(TASKS_SPAWN_PER_FRAME);
+    let pool = AsyncComputeTaskPool::get();
+
+    // Клонируем PerlinCache — она Copy, копирование бесплатно.
+    let cache_snapshot = perlin.0;
+
+    for (_, key) in to_load.into_iter().take(to_spawn) {
+        let cx = key.x;
+        let cz = key.y;
+        let cache = cache_snapshot;
+        let task = pool.spawn(async move {
+            generator::generate_chunk(&cache, cx, cz)
+        });
+        pending_gen.tasks.push(PendingChunkTask { coord: key, task });
+    }
+}
+  
+
+/// Синхронная перестройка «грязных» чанков при изменении блоков.
+/// Здесь мы остаёмся синхронными — игрок ожидает мгновенной реакции
+/// после ломания/установки, а таких чанков обычно 1–2.
 fn rebuild_dirty_chunks(
     world: Res<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut chunk_q: Query<(&ChunkMesh, &mut Mesh3d)>,
+    mut pending_mesh: ResMut<PendingMeshes>,
 ) {
     if dirty.0.is_empty() { return; }
 
     dirty.0.sort_by_key(|c| (c.x, c.y));
     dirty.0.dedup();
 
-    // `std::mem::take` вместо `drain(..).collect()` — не аллоцирует
-    // новый вектор, а забирает старый.
     let coords: Vec<IVec2> = std::mem::take(&mut dirty.0);
 
     let t0 = std::time::Instant::now();
@@ -716,6 +958,10 @@ fn rebuild_dirty_chunks(
 
     for coord in coords {
         if !world.has_chunk(coord.x, coord.y) { continue; }
+
+        // Если для этого чанка уже висит async-задача меша —
+        // не плодим дубликаты, пусть отработает.
+        pending_mesh.tasks.retain(|p| p.coord != coord);
 
         let new_mesh = build_chunk_mesh(&world, coord.x, coord.y);
         let verts = new_mesh.count_vertices();
