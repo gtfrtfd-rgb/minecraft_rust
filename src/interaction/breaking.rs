@@ -1,20 +1,24 @@
 use bevy::prelude::*;
 use bevy::audio::{AudioPlayer, PlaybackSettings, Volume};
-use crate::core::state::{AppState, HOTBAR, SelectedSlot, Settings, SY};
+use crate::core::state::{AppState, HOTBAR, SelectedSlot, Settings};
 use crate::world::chunk::{WorldData, DirtyChunks, BlockType};
 use crate::player::controller::Player;
 use crate::mobs::ai::{Mob, MobState};
 use crate::audio::SoundHandles;
 use super::raycast::{TargetBlock, TargetMob};
 
+/// Сколько секунд нужно удерживать ЛКМ, чтобы сломать блок.
 const BREAK_TIME: f32 = 0.35;
 
+/// Прогресс ломания текущего блока.
 #[derive(Resource, Default)]
 pub struct BreakProgress {
     pub target: Option<IVec3>,
     pub progress: f32,
 }
 
+/// Рандомизатор питча — при каждом действии питч гуляет
+/// в диапазоне 0.8–1.0, как в MC.
 #[derive(Resource)]
 pub struct SoundRng(pub u32);
 
@@ -162,7 +166,7 @@ fn handle_place(
     if hit.normal == IVec3::ZERO { return; }
 
     let pos = hit.prev;
-    if pos.y < 0 || pos.y >= SY { return; }
+    if pos.y < 0 || pos.y >= crate::core::state::SY { return; }
     if world.get(pos.x, pos.y, pos.z).is_solid() { return; }
 
     if let Ok(player_tf) = player_q.single() {
@@ -173,10 +177,11 @@ fn handle_place(
     world.set(pos.x, pos.y, pos.z, block_to_place);
     dirty.mark(pos.x, pos.z);
 
+    // Звук — по материалу установленного блока.
     if let Some(s) = sounds.as_ref() {
         let pitch = rng.pitch();
         commands.spawn((
-            AudioPlayer(s.place_block.clone()),
+            AudioPlayer(s.place_sound_for(block_to_place)),
             PlaybackSettings::DESPAWN
                 .with_volume(Volume::Linear(0.55 * settings.master_volume))
                 .with_speed(pitch),

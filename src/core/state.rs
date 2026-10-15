@@ -13,7 +13,6 @@ pub const CHUNK_SIZE: i32 = 16;
 pub const CHUNK_AREA: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
 pub const CHUNK_VOLUME: usize = CHUNK_AREA * SY as usize;
 
-/// Кросс-платформенная папка данных приложения.
 pub fn data_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
         if let Ok(appdata) = std::env::var("APPDATA") {
@@ -71,10 +70,6 @@ pub enum AppState {
     InGame,
     Paused,
 }
-
-// ============================================================
-// СПИСКИ ВАРИАНТОВ
-// ============================================================
 
 pub const FPS_OPTIONS: [u32; 8] = [30, 60, 90, 120, 144, 165, 180, 240];
 
@@ -191,6 +186,19 @@ pub struct PendingLoadWorld(pub Option<PathBuf>);
 
 #[derive(Resource, Default)]
 pub struct ActiveWorld(pub Option<PathBuf>);
+
+/// Активное переименование мира. Если `Some`, в меню миров
+/// открыт инлайн-редактор имени, и символы с клавиатуры идут в черновик.
+#[derive(Resource, Default)]
+pub struct RenamingWorld(pub Option<RenameState>);
+
+#[derive(Clone)]
+pub struct RenameState {
+    /// Путь к файлу мира, который переименовываем.
+    pub path: PathBuf,
+    /// Текущий черновик имени.
+    pub draft: String,
+}
 
 // ============================================================
 // НАСТРОЙКИ
@@ -343,6 +351,7 @@ impl Plugin for GameStatePlugin {
             .init_resource::<SelectedWorldIdx>()
             .init_resource::<PendingLoadWorld>()
             .init_resource::<ActiveWorld>()
+            .init_resource::<RenamingWorld>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
             .add_systems(Startup, init_keybinds)
@@ -479,11 +488,6 @@ fn apply_vsync(
     }
 }
 
-/// Ограничение FPS через sleep.
-///
-/// ВАЖНО: не работает, если включён VSync — иначе получится
-/// «двойное ограничение» (VSync + наш sleep), что даёт дёрганый
-/// тайминг и «вязкое» управление. Пока VSync On — sleep пропускаем.
 fn apply_fps_limit(
     settings: Res<Settings>,
     time: Res<Time>,

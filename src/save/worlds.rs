@@ -94,6 +94,19 @@ pub fn delete_world(path: &Path) -> std::io::Result<()> {
     fs::remove_file(path)
 }
 
+/// Переименовывает мир: читает JSON, меняет поле `world_name`,
+/// пишет обратно. Имя файла не меняется — оно не видно пользователю.
+pub fn rename_world(path: &Path, new_name: &str) -> std::io::Result<()> {
+    let s = fs::read_to_string(path)?;
+    let mut meta: SaveMeta = serde_json::from_str(&s)
+        .map_err(std::io::Error::other)?;
+    meta.world_name = new_name.to_string();
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(std::io::Error::other)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
 /// Генерирует свободное имя вида "New World", "New World 2", ...
 pub fn generate_world_name() -> String {
     let dir = worlds_dir();
