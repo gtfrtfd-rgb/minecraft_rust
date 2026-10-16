@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use bevy::ui_widgets::Button;
 use bevy::app::AppExit;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use crate::core::state::{AppState, RebindingState};
+use crate::core::state::{AppState, RebindingState, ReturnState};
 
 #[derive(Component)]
 struct MainMenuRoot;
@@ -15,6 +16,8 @@ pub enum MenuAction {
     Settings,
     OpenKeybinds,
     ExitToSettings,
+    /// Вернуться туда, откуда пришли (Menu или Paused).
+    ExitToReturn,
     Resume,
     ExitToMenu,
     ExitGame,
@@ -48,8 +51,8 @@ macro_rules! menu_button {
                 Button,
                 Interaction::default(),
                 Node {
-                    width: Val::Px(360.0),
-                    height: Val::Px(64.0),
+                    width: Val::Px(340.0),
+                    height: Val::Px(60.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
@@ -63,7 +66,7 @@ macro_rules! menu_button {
             .with_children(|b| {
                 b.spawn((
                     Text::new($label),
-                    TextFont { font_size: FontSize::Px(30.0), ..default() },
+                    TextFont { font_size: FontSize::Px(28.0), ..default() },
                     TextColor(Color::WHITE),
                 ));
             });
@@ -73,6 +76,7 @@ macro_rules! menu_button {
 fn spawn_menus(mut commands: Commands) {
     info!("Spawning menus");
 
+    // -------- Главное меню --------
     commands
         .spawn((
             Node {
@@ -102,6 +106,7 @@ fn spawn_menus(mut commands: Commands) {
             menu_button!(root, MenuAction::ExitGame,     "EXIT",         UiRect::ZERO);
         });
 
+    // -------- Меню паузы --------
     commands
         .spawn((
             Node {
@@ -127,6 +132,7 @@ fn spawn_menus(mut commands: Commands) {
             ));
 
             menu_button!(root, MenuAction::Resume,     "RESUME",       UiRect::top(Val::Px(40.0)));
+            menu_button!(root, MenuAction::Settings,   "SETTINGS",     UiRect::ZERO);
             menu_button!(root, MenuAction::ExitToMenu, "EXIT TO MENU", UiRect::ZERO);
             menu_button!(root, MenuAction::ExitGame,   "QUIT GAME",    UiRect::ZERO);
 
@@ -161,6 +167,8 @@ fn toggle_menu_visibility(
 }
 
 fn handle_menu_buttons(
+    state: Res<State<AppState>>,
+    mut return_state: ResMut<ReturnState>,
     mut q: Query<
         (&Interaction, &MenuAction, &mut BackgroundColor, &mut BorderColor),
         (Changed<Interaction>, With<Button>),
@@ -178,6 +186,8 @@ fn handle_menu_buttons(
                     next_state.set(AppState::InGame);
                 }
                 MenuAction::Settings => {
+                    // Запоминаем, откуда открыли: Menu или Paused.
+                    return_state.0 = state.get().clone();
                     next_state.set(AppState::Settings);
                 }
                 MenuAction::OpenKeybinds => {
@@ -185,6 +195,9 @@ fn handle_menu_buttons(
                 }
                 MenuAction::ExitToSettings => {
                     next_state.set(AppState::Settings);
+                }
+                MenuAction::ExitToReturn => {
+                    next_state.set(return_state.0.clone());
                 }
                 MenuAction::ExitToMenu => {
                     next_state.set(AppState::Menu);
@@ -209,6 +222,7 @@ fn handle_escape_key(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<AppState>>,
     rebinding: Res<RebindingState>,
+    return_state: Res<ReturnState>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) { return; }
@@ -221,7 +235,8 @@ fn handle_escape_key(
             next_state.set(AppState::InGame);
         }
         AppState::Settings => {
-            next_state.set(AppState::Menu);
+            // Возвращаемся туда, откуда открыли Settings.
+            next_state.set(return_state.0.clone());
         }
         AppState::Keybinds => {
             let _ = rebinding;

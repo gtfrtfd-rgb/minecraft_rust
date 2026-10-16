@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::ui_widgets::Button;
 
 use crate::core::state::{
     AppState, Settings, RebindingState, BindAction, key_to_string,

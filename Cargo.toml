@@ -2,9 +2,10 @@
 name = "minecraft_rust"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"
 
 [dependencies]
-bevy = { version = "0.19", features = ["wav"] }
+bevy = { version = "0.20", features = ["wav", "bevy_ui_widgets"] }
 noise = "0.9"
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }

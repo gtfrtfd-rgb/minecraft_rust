@@ -71,6 +71,21 @@ pub enum AppState {
     Paused,
 }
 
+// ============================================================
+// ВОЗВРАТ ИЗ НАСТРОЕК
+// ============================================================
+//
+// Куда вернуться, когда игрок нажимает BACK в Settings
+// или Escape. Позволяет открывать настройки как из главного
+// меню, так и из паузы, и возвращаться туда же.
+
+#[derive(Resource, Clone)]
+pub struct ReturnState(pub AppState);
+
+impl Default for ReturnState {
+    fn default() -> Self { Self(AppState::Menu) }
+}
+
 pub const FPS_OPTIONS: [u32; 8] = [30, 60, 90, 120, 144, 165, 180, 240];
 
 pub const RESOLUTION_OPTIONS: [(u32, u32); 5] = [
@@ -90,9 +105,6 @@ impl Default for MaxResolutionIndex {
     }
 }
 
-// ============================================================
-// ДЕЙСТВИЯ ДЛЯ ПЕРЕНАЗНАЧЕНИЯ
-// ============================================================
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BindAction {
     Forward,
@@ -163,9 +175,6 @@ pub fn key_to_string(k: KeyCode) -> String {
     format!("{:?}", k)
 }
 
-// ============================================================
-// ИНФОРМАЦИЯ О МИРЕ
-// ============================================================
 #[derive(Clone)]
 pub struct WorldInfo {
     pub name: String,
@@ -187,22 +196,15 @@ pub struct PendingLoadWorld(pub Option<PathBuf>);
 #[derive(Resource, Default)]
 pub struct ActiveWorld(pub Option<PathBuf>);
 
-/// Активное переименование мира. Если `Some`, в меню миров
-/// открыт инлайн-редактор имени, и символы с клавиатуры идут в черновик.
 #[derive(Resource, Default)]
 pub struct RenamingWorld(pub Option<RenameState>);
 
 #[derive(Clone)]
 pub struct RenameState {
-    /// Путь к файлу мира, который переименовываем.
     pub path: PathBuf,
-    /// Текущий черновик имени.
     pub draft: String,
 }
 
-// ============================================================
-// НАСТРОЙКИ
-// ============================================================
 #[derive(Resource, Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Settings {
@@ -352,6 +354,7 @@ impl Plugin for GameStatePlugin {
             .init_resource::<PendingLoadWorld>()
             .init_resource::<ActiveWorld>()
             .init_resource::<RenamingWorld>()
+            .init_resource::<ReturnState>()
             .insert_resource(WorldSeed(rand::random()))
             .insert_resource(ClearColor(Color::srgb(0.53, 0.81, 0.92)))
             .add_systems(Startup, init_keybinds)

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::ui_widgets::Button;
 use bevy::app::AppExit;
 use std::fs;
 use std::path::PathBuf;
@@ -55,7 +56,6 @@ impl Plugin for SettingsPlugin {
     }
 }
 
-/// Путь к settings.json — в системной папке данных приложения.
 pub fn settings_path() -> PathBuf {
     let mut p = data_dir();
     p.push("saves");
@@ -89,10 +89,7 @@ fn migrate_legacy_settings_if_needed() {
     }
 
     if fs::copy(&old_path, &new_path).is_ok() {
-        info!(
-            "Migrated settings.json from {:?} to {:?}",
-            old_path, new_path
-        );
+        info!("Migrated settings.json from {:?} to {:?}", old_path, new_path);
     }
 }
 
@@ -275,6 +272,7 @@ fn spawn_settings_menu(mut commands: Commands) {
 
             root.spawn(Node { height: Val::Px(10.0), ..default() });
 
+            // BACK теперь ведёт туда, откуда открыли — Menu или Paused.
             root.spawn((
                 Button,
                 Interaction::default(),
@@ -288,7 +286,7 @@ fn spawn_settings_menu(mut commands: Commands) {
                 },
                 BackgroundColor(BTN_NORMAL),
                 BorderColor::all(BORDER_NORMAL),
-                crate::ui::menu::MenuAction::ExitToMenu,
+                crate::ui::menu::MenuAction::ExitToReturn,
             ))
             .with_children(|b| {
                 b.spawn((
