@@ -11,6 +11,7 @@ const BTN_ACTIVE: Color   = Color::srgb(0.85, 0.45, 0.10);
 const BORDER_NORMAL: Color = Color::srgba(1.0, 1.0, 1.0, 0.25);
 const BORDER_HOVER:  Color = Color::WHITE;
 const BORDER_ACTIVE: Color = Color::srgb(1.0, 0.85, 0.30);
+const WARNING_COLOR: Color = Color::srgb(1.0, 0.35, 0.35);
 
 #[derive(Component)]
 struct KeybindsRoot;
@@ -21,11 +22,34 @@ struct KeybindButton(BindAction);
 #[derive(Component, Clone, Copy)]
 struct KeybindValueText(BindAction);
 
+#[derive(Component)]
+struct RebindWarningText;
+
+/// Предупреждение о конфликте клавиш.
+/// Показывается, если игрок пытается назначить уже занятую клавишу.
+#[derive(Resource, Default)]
+pub struct RebindWarning {
+    pub message: Option<String>,
+    pub timer: f32,
+}
+
+impl RebindWarning {
+    fn show(&mut self, msg: String) {
+        self.message = Some(msg);
+        self.timer = 3.0;
+    }
+    fn clear(&mut self) {
+        self.message = None;
+        self.timer = 0.0;
+    }
+}
+
 pub struct KeybindsPlugin;
 
 impl Plugin for KeybindsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_keybinds_menu)
+        app.init_resource::<RebindWarning>()
+            .add_systems(Startup, spawn_keybinds_menu)
             .add_systems(
                 Update,
                 (
@@ -33,8 +57,10 @@ impl Plugin for KeybindsPlugin {
                     reset_stale_button_colors,
                     handle_keybind_buttons,
                     catch_rebind_input,
+                    tick_rebind_warning,
                     handle_escape_in_keybinds,
                     update_keybind_texts,
+                    update_rebind_warning_text,
                 ).chain(),
             );
         info!("KeybindsPlugin loaded.");
@@ -72,7 +98,20 @@ fn spawn_keybinds_menu(mut commands: Commands) {
                 spawn_keybind_row(root, action);
             }
 
-            root.spawn(Node { height: Val::Px(20.0), ..default() });
+            root.spawn(Node { height: Val::Px(16.0), ..default() });
+
+            // Строка предупреждения о конфликте. По умолчанию пустая,
+            // заполняется при попытке назначить занятую клавишу.
+            root.spawn((
+                Text::new(""),
+                TextFont { font_size: FontSize::Px(18.0), ..default() },
+                TextColor(WARNING_COLOR),
+                Node {
+                    height: Val::Px(24.0),
+                    ..default()
+                },
+                RebindWarningText,
+            ));
 
             root.spawn((
                 Button,
@@ -162,8 +201,6 @@ fn toggle_keybinds_visibility(
     }
 }
 
-/// Если `rebinding.action` сброшен (успешный rebind или отмена),
-/// принудительно возвращаем всем кнопкам нормальный цвет.
 fn reset_stale_button_colors(
     rebinding: Res<RebindingState>,
     mut q: Query<
@@ -183,6 +220,7 @@ fn reset_stale_button_colors(
 fn handle_keybind_buttons(
     state: Res<State<AppState>>,
     mut rebinding: ResMut<RebindingState>,
+    mut warning: ResMut<RebindWarning>,
     mut q: Query<
         (&Interaction, &KeybindButton, &mut BackgroundColor, &mut BorderColor),
         (Changed<Interaction>, With<Button>),
@@ -194,6 +232,7 @@ fn handle_keybind_buttons(
         match *interaction {
             Interaction::Pressed => {
                 rebinding.action = Some(button.0);
+                warning.clear();
                 *bg = BackgroundColor(BTN_ACTIVE);
                 *border = BorderColor::all(BORDER_ACTIVE);
             }
@@ -213,21 +252,70 @@ fn handle_keybind_buttons(
     }
 }
 
+/// Ищет действие, у которого уже назначена эта клавиша.
+/// Возвращает `Some(action)` при конфликте, `None` если клавиша свободна.
+fn find_conflict(
+    settings: &Settings,
+    action: BindAction,
+    key_str: &str,
+) -> Option<BindAction> {
+    for other in BindAction::ALL {
+        if other == action { continue; }
+        if settings.key_string_for(other) == key_str {
+            return Some(other);
+        }
+    }
+    None
+}
+
 fn catch_rebind_input(
     state: Res<State<AppState>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut rebinding: ResMut<RebindingState>,
     mut settings: ResMut<Settings>,
+    mut warning: ResMut<RebindWarning>,
 ) {
     if *state.get() != AppState::Keybinds { return; }
     let Some(action) = rebinding.action else { return; };
 
     for key in keys.get_just_pressed() {
         if *key == KeyCode::Escape { continue; }
-        settings.set_key_string(action, key_to_string(*key));
+
+        let key_str = key_to_string(*key);
+
+        // Проверка конфликта: если эта клавиша уже занята другим
+        // действием — предупреждение, назначение отменяется.
+        // Режим переназначения остаётся активным, чтобы можно было
+        // сразу нажать другую клавишу.
+        if let Some(conflict) = find_conflict(&settings, action, &key_str) {
+            warning.show(format!(
+                "Key '{}' is already bound to '{}'. Press a different key.",
+                key_str, conflict.label()
+            ));
+            info!(
+                "Rebind conflict: {} already used by {}",
+                key_str, conflict.label()
+            );
+            return;
+        }
+
+        settings.set_key_string(action, key_str.clone());
         rebinding.action = None;
-        info!("Rebound {:?} -> {}", action, key_to_string(*key));
+        warning.clear();
+        info!("Rebound {:?} -> {}", action, key_str);
         return;
+    }
+}
+
+/// Уменьшает таймер предупреждения и сбрасывает его по истечении.
+fn tick_rebind_warning(
+    time: Res<Time>,
+    mut warning: ResMut<RebindWarning>,
+) {
+    if warning.message.is_none() { return; }
+    warning.timer -= time.delta_secs();
+    if warning.timer <= 0.0 {
+        warning.clear();
     }
 }
 
@@ -235,6 +323,7 @@ fn handle_escape_in_keybinds(
     state: Res<State<AppState>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut rebinding: ResMut<RebindingState>,
+    mut warning: ResMut<RebindWarning>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     if *state.get() != AppState::Keybinds { return; }
@@ -242,6 +331,7 @@ fn handle_escape_in_keybinds(
 
     if rebinding.action.is_some() {
         rebinding.action = None;
+        warning.clear();
         info!("Rebind cancelled");
     } else {
         next_state.set(AppState::Settings);
@@ -255,10 +345,6 @@ fn update_keybind_texts(
     rebinding: Res<RebindingState>,
     mut q: Query<(&KeybindValueText, &mut Text)>,
 ) {
-    // Обновляем, если:
-    //   • сменилось состояние (вошли в меню),
-    //   • сменились настройки (переназначили клавишу),
-    //   • сменилось состояние rebinding (зашёл в режим выбора).
     if !state.is_changed() && !settings.is_changed() && !rebinding.is_changed() {
         return;
     }
@@ -270,5 +356,15 @@ fn update_keybind_texts(
         } else {
             text.0 = settings.key_string_for(val.0).to_string();
         }
+    }
+}
+
+fn update_rebind_warning_text(
+    warning: Res<RebindWarning>,
+    mut q: Query<&mut Text, With<RebindWarningText>>,
+) {
+    if !warning.is_changed() { return; }
+    for mut text in q.iter_mut() {
+        text.0 = warning.message.clone().unwrap_or_default();
     }
 }

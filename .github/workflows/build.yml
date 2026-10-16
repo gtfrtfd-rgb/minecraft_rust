@@ -12,7 +12,7 @@ env:
   BIN_NAME: minecraft_rust
 
 jobs:
-  build:
+  build-windows:
     name: Build — Windows
     runs-on: windows-latest
 
@@ -46,3 +46,58 @@ jobs:
           name: ${{ env.BIN_NAME }}-x86_64-pc-windows-msvc
           path: ${{ env.BIN_NAME }}-x86_64-pc-windows-msvc.zip
           if-no-files-found: error
+
+  check-linux:
+    name: Check — Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libvulkan-dev \
+            libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-check
+
+      - name: Cargo check
+        run: cargo check --all-targets --locked
+
+  check-macos:
+    name: Check — macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-check
+
+      - name: Cargo check
+        run: cargo check --all-targets --locked
