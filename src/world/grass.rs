@@ -73,14 +73,16 @@ fn grass_spread_system(
             continue;
         }
 
-        // Пробегаем по высоте сверху вниз.
         for y in (1..SY - 1).rev() {
             let here = world.get(wx, y, wz);
             let above = world.get(wx, y + 1, wz);
 
             if here == BlockType::Dirt && !above.is_solid() {
                 if has_grass_neighbor(&world, wx, y, wz) {
-                    world.set(wx, y, wz, BlockType::Grass);
+                    // Ключевое изменение: set_natural вместо set.
+                    // Рост травы — это естественный процесс, он не
+                    // должен попадать в edits и раздувать meta.json.
+                    world.set_natural(wx, y, wz, BlockType::Grass);
                     dirty.mark(wx, wz);
                 }
                 break;
@@ -89,7 +91,6 @@ fn grass_spread_system(
     }
 }
 
-/// Возвращает true, если в 6-соседних блоках есть grass.
 fn has_grass_neighbor(world: &WorldData, x: i32, y: i32, z: i32) -> bool {
     const OFFSETS: [(i32, i32, i32); 6] = [
         ( 1, 0, 0),

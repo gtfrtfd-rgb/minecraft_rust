@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::world::chunk::{WorldData, BlockType, ChunkMesh, DirtyChunks};
+use crate::world::chunk::{
+    WorldData, BlockType, ChunkMesh, DirtyChunks,
+    PendingChunks, PendingMeshes,
+};
 use crate::player::controller::Player;
 use crate::core::state::{
     WorldSeed, PlayerLook, SY, CHUNK_SIZE, AppState,
@@ -34,7 +37,6 @@ pub struct BlockEdit {
 pub struct SaveMeta {
     pub format_version: u32,
     pub game_version: String,
-    /// Имя мира. Опционально — старые сейвы могут его не иметь.
     #[serde(default)]
     pub world_name: String,
     pub seed: u32,
@@ -65,12 +67,10 @@ impl Plugin for PersistencePlugin {
     }
 }
 
-/// Мигрирует старый одиночный сейв (рядом с exe или в data_dir/saves)
-/// в worlds/Default.json.
+/// Мигрирует старый одиночный сейв в worlds/Default.json.
 fn migrate_legacy_save_if_needed() {
     let worlds = worlds_dir();
 
-    // Если worlds/ уже содержит хоть один файл — миграция не нужна.
     if worlds.exists() {
         if let Ok(mut it) = fs::read_dir(&worlds) {
             if it.next().is_some() { return; }
@@ -107,28 +107,47 @@ fn migrate_legacy_save_if_needed() {
     }
 }
 
-/// Загружает мир, когда игрок заходит в InGame.
+/// Загружает мир при входе в InGame.
+///
+/// ВАЖНО: очищаем все pending async-задачи, чтобы результаты от
+/// прошлого мира не прилетели в новый. Без этого задачи с чанками
+/// старого сида вставляются в мир, создавая мусор и утечку памяти
+/// (задачи никто не отменяет — они доживают до конца, занимая слоты
+/// в AsyncComputeTaskPool).
 fn on_enter_ingame(
-    mut pending: ResMut<PendingLoadWorld>,
+    mut pending_load: ResMut<PendingLoadWorld>,
     mut loaded: ResMut<LoadedSave>,
     mut active: ResMut<ActiveWorld>,
     mut world: ResMut<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
+    mut pending_chunks: ResMut<PendingChunks>,
+    mut pending_meshes: ResMut<PendingMeshes>,
     mut seed: ResMut<WorldSeed>,
     mut look: ResMut<PlayerLook>,
     mut player_q: Query<(&mut Transform, &mut Player)>,
     chunk_q: Query<Entity, With<ChunkMesh>>,
     mut commands: Commands,
 ) {
-    let Some(path) = pending.0.take() else { return; };
+    let Some(path) = pending_load.0.take() else { return; };
 
-    // Чистим старый мир.
+    // Очищаем старый мир.
     for entity in chunk_q.iter() {
         commands.entity(entity).despawn();
     }
     world.chunks.clear();
     world.edits.clear();
     dirty.0.clear();
+
+    // Ключевая правка: очищаем async-задачи от прошлой сессии.
+    // Задачи нельзя "отменить" — они досчитают в фоне и вернут
+    // результат, который мы просто проигнорируем. Но убирая их
+    // из Vec, мы:
+    //   • не поллим их в stream_chunks → не вставим мусор в мир;
+    //   • освобождаем слоты MAX_GEN_IN_FLIGHT / MAX_MESH_IN_FLIGHT
+    //     для новых задач нового мира;
+    //   • не даём им накапливаться между заходами в разные миры.
+    pending_chunks.tasks.clear();
+    pending_meshes.tasks.clear();
 
     // Читаем meta.
     let Ok(s) = fs::read_to_string(&path) else {
@@ -140,7 +159,8 @@ fn on_enter_ingame(
         Err(e) => { warn!("Parse world file error: {}", e); return; }
     };
 
-    // Сид.
+    // Сид. Это триггерит update_perlin_cache в следующем Update
+    // до stream_chunks в PostUpdate — Perlin пересоздастся.
     seed.0 = meta.seed;
 
     // Правки.
@@ -173,18 +193,28 @@ fn on_enter_ingame(
     loaded.meta = Some(meta);
 }
 
-/// Сохраняет мир при выходе из игры (пауза, меню, app exit).
+/// Сохраняет мир при выходе из игры.
+/// Плюс очищает async-задачи, чтобы они не крутились в фоне
+/// в меню. При следующем входе в мир они не нужны — сгенерируются
+/// заново.
 fn on_exit_ingame(
     active: Res<ActiveWorld>,
     world: Res<WorldData>,
     seed: Res<WorldSeed>,
     look: Res<PlayerLook>,
     player_q: Query<(&Transform, &Player)>,
+    mut pending_chunks: ResMut<PendingChunks>,
+    mut pending_meshes: ResMut<PendingMeshes>,
 ) {
     let Some(path) = active.0.clone() else { return; };
     if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
         warn!("Save on exit failed: {}", e);
     }
+
+    // Чистим задачи, чтобы не жгли CPU в главном меню и не
+    // занимали слоты, когда игрок вернётся в другой мир.
+    pending_chunks.tasks.clear();
+    pending_meshes.tasks.clear();
 }
 
 fn auto_save(
@@ -236,7 +266,6 @@ fn save_game_to(
         return Err("player not found".into());
     };
 
-    // Имя мира — не перезаписываем, читаем старое.
     let world_name = fs::read_to_string(&path).ok()
         .and_then(|s| serde_json::from_str::<SaveMeta>(&s).ok())
         .map(|m| m.world_name)

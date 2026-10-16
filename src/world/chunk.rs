@@ -324,6 +324,27 @@ impl WorldData {
             chunk.set_local(lx, y, lz, block);
         }
     }
+        /// Меняет блок БЕЗ записи в `edits` — для естественных
+    /// процессов (рост травы, распространение воды и т.п.).
+    ///
+    /// Такие изменения не сохраняются в файл мира: при выгрузке
+    /// чанка они теряются, и после перезагрузки блок вернётся
+    /// к состоянию процедурной генерации. Это ожидаемо — трава
+    /// снова вырастет за 1–2 минуты игры.
+    ///
+    /// Если блок в этом чанке ещё не загружен, метод ничего
+    /// не делает — «в пустоту» правки не пишутся.
+    pub fn set_natural(&mut self, x: i32, y: i32, z: i32, block: BlockType) {
+        if y < 0 || y >= SY { return; }
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let key = IVec2::new(cx, cz);
+        if let Some(chunk) = self.chunks.get_mut(&key) {
+            let lx = x.rem_euclid(CHUNK_SIZE);
+            let lz = z.rem_euclid(CHUNK_SIZE);
+            chunk.set_local(lx, y, lz, block);
+        }
+    }
 
     #[inline]
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {

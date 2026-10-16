@@ -37,37 +37,66 @@ pub struct SoundHandles {
 
 impl SoundHandles {
     pub fn break_sound_for(&self, block: BlockType) -> Handle<AudioSource> {
-        use BlockType::*;
         match block {
-            Grass | Dirt | Sand | Snow | Leaves => self.break_soft.clone(),
-            Stone | Cobblestone | Obsidian     => self.break_stone.clone(),
-            Log | Planks                       => self.break_wood.clone(),
-            Glass                              => self.break_glass.clone(),
-            Brick                              => self.break_brick.clone(),
-            Air                                => self.break_soft.clone(),
+            BlockType::Grass
+            | BlockType::Dirt
+            | BlockType::Sand
+            | BlockType::Snow
+            | BlockType::Leaves => self.break_soft.clone(),
+
+            BlockType::Stone
+            | BlockType::Cobblestone
+            | BlockType::Obsidian => self.break_stone.clone(),
+
+            BlockType::Log
+            | BlockType::Planks => self.break_wood.clone(),
+
+            BlockType::Glass => self.break_glass.clone(),
+            BlockType::Brick => self.break_brick.clone(),
+            BlockType::Air   => self.break_soft.clone(),
         }
     }
 
     pub fn place_sound_for(&self, block: BlockType) -> Handle<AudioSource> {
-        use BlockType::*;
         match block {
-            Grass | Dirt | Sand | Snow | Leaves => self.place_soft.clone(),
-            Stone | Cobblestone | Obsidian     => self.place_stone.clone(),
-            Log | Planks                       => self.place_wood.clone(),
-            Glass                              => self.place_glass.clone(),
-            Brick                              => self.place_brick.clone(),
-            Air                                => self.place_soft.clone(),
+            BlockType::Grass
+            | BlockType::Dirt
+            | BlockType::Sand
+            | BlockType::Snow
+            | BlockType::Leaves => self.place_soft.clone(),
+
+            BlockType::Stone
+            | BlockType::Cobblestone
+            | BlockType::Obsidian => self.place_stone.clone(),
+
+            BlockType::Log
+            | BlockType::Planks => self.place_wood.clone(),
+
+            BlockType::Glass => self.place_glass.clone(),
+            BlockType::Brick => self.place_brick.clone(),
+            BlockType::Air   => self.place_soft.clone(),
         }
     }
 
     pub fn step_sounds_for(&self, block: BlockType) -> &[Handle<AudioSource>] {
-        use BlockType::*;
         match block {
-            Grass | Dirt | Leaves | Snow => &self.step_soft,
-            Sand                          => &self.step_sand,
-            Log | Planks                  => &self.step_wood,
-            Stone | Cobblestone | Brick | Obsidian | Glass => &self.step_stone,
-            Air                           => &self.step_soft,
+            BlockType::Grass
+            | BlockType::Dirt
+            | BlockType::Leaves
+            | BlockType::Snow => &self.step_soft,
+
+            BlockType::Sand => &self.step_sand,
+
+            BlockType::Log
+            | BlockType::Planks => &self.step_wood,
+
+            BlockType::Stone
+            | BlockType::Cobblestone
+            | BlockType::Brick
+            | BlockType::Obsidian
+            | BlockType::Glass => &self.step_stone,
+
+            BlockType::Air => &self.step_soft,
         }
     }
 }
@@ -158,7 +187,7 @@ fn seed_from(base: u32, variant: u32) -> u32 {
 }
 
 // ============================================================
-// Удар по мобу — «шлёпок»: шум + тон 180 Гц.
+// Удар по мобу
 // ============================================================
 fn gen_hit() -> Vec<i16> {
     let dur = 0.10_f32;
@@ -177,10 +206,9 @@ fn gen_hit() -> Vec<i16> {
 }
 
 // ============================================================
-// ЛОМАНИЕ БЛОКОВ — 5 звуков по материалам
+// ЛОМАНИЕ
 // ============================================================
 
-/// Мягкие блоки: земля, трава, песок, снег, листва.
 fn gen_break_soft() -> Vec<i16> {
     let dur = 0.12_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -205,7 +233,6 @@ fn gen_break_soft() -> Vec<i16> {
     out
 }
 
-/// Камень: резкий «крак» с ВЧ-«цоком».
 fn gen_break_stone() -> Vec<i16> {
     let dur = 0.16_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -234,7 +261,6 @@ fn gen_break_stone() -> Vec<i16> {
     out
 }
 
-/// Дерево: полый «ток» с двумя модами.
 fn gen_break_wood() -> Vec<i16> {
     let dur = 0.20_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -264,7 +290,6 @@ fn gen_break_wood() -> Vec<i16> {
     out
 }
 
-/// Стекло: высокий звонкий «дзинь».
 fn gen_break_glass() -> Vec<i16> {
     let dur = 0.25_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -289,7 +314,6 @@ fn gen_break_glass() -> Vec<i16> {
     out
 }
 
-/// Кирпич: сухой «клац».
 fn gen_break_brick() -> Vec<i16> {
     let dur = 0.15_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -319,14 +343,9 @@ fn gen_break_brick() -> Vec<i16> {
 }
 
 // ============================================================
-// УСТАНОВКА БЛОКА — 5 звуков по материалам
-//
-// Общая идея: короткий «тук» со спадом, но у каждого материала
-// свой тембр и высота тона.
+// УСТАНОВКА
 // ============================================================
 
-/// Мягкий глухой «тук» для земли/травы/песка/снега.
-/// Низкий, короткий, почти без ВЧ.
 fn gen_place_soft() -> Vec<i16> {
     let dur = 0.13_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -339,11 +358,9 @@ fn gen_place_soft() -> Vec<i16> {
         let attack = (t / 0.004).min(1.0);
         let env = attack * (1.0 - t / dur).max(0.0).powf(2.2);
 
-        // Основной низкий тон — «подушка» под звук.
         let tone_env = (1.0 - t / 0.07).max(0.0);
         let tone = (t * 150.0 * std::f32::consts::TAU).sin() * tone_env;
 
-        // Глухой шум.
         let noise = lcg_next(&mut state);
         lp = lp * 0.85 + noise * 0.15;
 
@@ -353,7 +370,6 @@ fn gen_place_soft() -> Vec<i16> {
     out
 }
 
-/// Звонкий «клац» для камня/булыжника/обсидиана.
 fn gen_place_stone() -> Vec<i16> {
     let dur = 0.12_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -366,15 +382,12 @@ fn gen_place_stone() -> Vec<i16> {
         let attack = (t / 0.0006).min(1.0);
         let env = attack * (1.0 - t / dur).max(0.0).powf(2.0);
 
-        // Средний тон 420 Гц — характер камня.
         let tone_env = (1.0 - t / 0.05).max(0.0);
         let tone = (t * 420.0 * std::f32::consts::TAU).sin() * tone_env;
 
-        // ВЧ-«клик» на атаке.
         let click_env = (1.0 - t / 0.008).max(0.0);
         let click = (t * 1800.0 * std::f32::consts::TAU).sin() * click_env;
 
-        // Полосовой шум.
         let noise = lcg_next(&mut state);
         lp = lp * 0.4 + noise * 0.6;
         let hp = noise - lp;
@@ -385,7 +398,6 @@ fn gen_place_stone() -> Vec<i16> {
     out
 }
 
-/// Полый «ток» для дерева — две моды, как у break_wood, но короче.
 fn gen_place_wood() -> Vec<i16> {
     let dur = 0.14_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -403,7 +415,6 @@ fn gen_place_wood() -> Vec<i16> {
         let mode2 = (t * 500.0 * std::f32::consts::TAU).sin()
             * (1.0 - t / 0.05).max(0.0).powf(4.0);
 
-        // Немного глухого шума для «деревянности».
         let noise = lcg_next(&mut state);
         lp = lp * 0.75 + noise * 0.25;
 
@@ -413,7 +424,6 @@ fn gen_place_wood() -> Vec<i16> {
     out
 }
 
-/// Высокий «дзынь» для стекла.
 fn gen_place_glass() -> Vec<i16> {
     let dur = 0.16_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -425,7 +435,6 @@ fn gen_place_glass() -> Vec<i16> {
         let attack = (t / 0.001).min(1.0);
         let env = attack * (1.0 - t / dur).max(0.0).powf(1.4);
 
-        // Два высоких резонанса.
         let ring1 = (t * 2000.0 * std::f32::consts::TAU).sin()
             * (1.0 - t / dur).max(0.0).powf(2.8);
         let ring2 = (t * 3300.0 * std::f32::consts::TAU).sin()
@@ -439,7 +448,6 @@ fn gen_place_glass() -> Vec<i16> {
     out
 }
 
-/// Сухой «клац» для кирпича.
 fn gen_place_brick() -> Vec<i16> {
     let dur = 0.13_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -452,11 +460,9 @@ fn gen_place_brick() -> Vec<i16> {
         let attack = (t / 0.001).min(1.0);
         let env = attack * (1.0 - t / dur).max(0.0).powf(1.7);
 
-        // Средний тон.
         let tone_env = (1.0 - t / 0.05).max(0.0);
         let tone = (t * 260.0 * std::f32::consts::TAU).sin() * tone_env;
 
-        // Сухой шумовой «треск» в начале.
         let crack_env = (1.0 - t / 0.010).max(0.0);
         let crack = (t * 1300.0 * std::f32::consts::TAU).sin() * crack_env;
 
@@ -471,10 +477,9 @@ fn gen_place_brick() -> Vec<i16> {
 }
 
 // ============================================================
-// ШАГИ — 4 материала
+// ШАГИ
 // ============================================================
 
-/// Мягкий шаг (трава / земля / снег / листва).
 fn gen_step_soft(variant: u32) -> Vec<i16> {
     let dur = 0.50_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -499,7 +504,6 @@ fn gen_step_soft(variant: u32) -> Vec<i16> {
     out
 }
 
-/// Шаг по камню / кирпичу / стеклу / обсидиану.
 fn gen_step_stone(variant: u32) -> Vec<i16> {
     let dur = 0.45_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -527,7 +531,6 @@ fn gen_step_stone(variant: u32) -> Vec<i16> {
     out
 }
 
-/// Шаг по дереву (доски / бревно).
 fn gen_step_wood(variant: u32) -> Vec<i16> {
     let dur = 0.48_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
@@ -557,7 +560,6 @@ fn gen_step_wood(variant: u32) -> Vec<i16> {
     out
 }
 
-/// Шаг по песку — длинное «шшшш».
 fn gen_step_sand(variant: u32) -> Vec<i16> {
     let dur = 0.50_f32;
     let n = (SAMPLE_RATE as f32 * dur) as usize;
