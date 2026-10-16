@@ -127,7 +127,21 @@
 ### Требования
 
 - **Rust 1.85+** — установить с [rustup.rs](https://rustup.rs)
-- **MSVC Build Tools** (Windows) — скачать с [visualstudio.microsoft.com](https://visualstudio.microsoft.com)
+
+**Платформо-специфичные:**
+
+- **Windows** — **MSVC Build Tools**: [visualstudio.microsoft.com](https://visualstudio.microsoft.com)
+- **Linux** — требует системные библиотеки **ALSA** (аудио), **Wayland**, **X11** и **Vulkan**. На Ubuntu/Debian:
+
+      sudo apt-get install -y \
+        pkg-config libasound2-dev libudev-dev \
+        libwayland-dev libxkbcommon-dev \
+        libx11-dev libxcursor-dev libxrandr-dev \
+        libxi-dev libxinerama-dev \
+        libvulkan-dev libssl-dev
+
+  На Fedora/Arch — аналогичные пакеты через `dnf`/`pacman`.
+- **macOS** — **собирается из коробки**, дополнительных зависимостей не требуется.
 
 ### Сборка и запуск
 
