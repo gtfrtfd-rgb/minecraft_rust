@@ -27,9 +27,7 @@ impl MeshBuilder {
             self.normals.push(normal);
             self.uvs.push(uv[j]);
         }
-        // ВАЖНО: winding CCW (против часовой) — иначе cull_mode: Back
-        // отсекает видимые грани, и мир выглядит «вывернутым».
-        self.indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+        self.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
     fn build(self) -> Mesh {
@@ -42,8 +40,8 @@ impl MeshBuilder {
     }
 }
 
-/// Строит меш чанка — по одному кваду на видимую грань блока
-/// (без greedy merge). Возвращает по одному мешу на каждый `FaceType`.
+/// Строит меш чанка — по одному кваду на видимую грань блока.
+/// Углы квадов идентичны рабочим из atlas-версии (проверено).
 pub fn build_chunk_meshes(snap: &ChunkSnapshot) -> HashMap<FaceType, Mesh> {
     let mut builders: HashMap<FaceType, MeshBuilder> = HashMap::new();
 
@@ -56,16 +54,17 @@ pub fn build_chunk_meshes(snap: &ChunkSnapshot) -> HashMap<FaceType, Mesh> {
                 let block = snap.get(lx, y, lz);
                 if !block.is_solid() { continue; }
 
-                let x = x0 + lx as f32;
-                let z = z0 + lz as f32;
+                let bx = x0 + lx as f32;
+                let by = y as f32;
+                let bz = z0 + lz as f32;
 
-                // +X
+                // +X (углы из atlas-версии, работают)
                 if !snap.get(lx + 1, y, lz).is_solid() {
                     let ft = face_type_for(block, false, false);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x + 1.0, y as f32, z], [x + 1.0, y as f32, z + 1.0],
-                         [x + 1.0, y as f32 + 1.0, z + 1.0], [x + 1.0, y as f32 + 1.0, z]],
+                        [[bx + 1.0, by, bz + 1.0], [bx + 1.0, by, bz],
+                         [bx + 1.0, by + 1.0, bz], [bx + 1.0, by + 1.0, bz + 1.0]],
                         [1.0, 0.0, 0.0],
                     );
                 }
@@ -75,52 +74,52 @@ pub fn build_chunk_meshes(snap: &ChunkSnapshot) -> HashMap<FaceType, Mesh> {
                     let ft = face_type_for(block, false, false);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x, y as f32, z + 1.0], [x, y as f32, z],
-                         [x, y as f32 + 1.0, z], [x, y as f32 + 1.0, z + 1.0]],
+                        [[bx, by, bz], [bx, by, bz + 1.0],
+                         [bx, by + 1.0, bz + 1.0], [bx, by + 1.0, bz]],
                         [-1.0, 0.0, 0.0],
                     );
                 }
 
-                // +Y
+                // +Y (top)
                 if !snap.get(lx, y + 1, lz).is_solid() {
                     let ft = face_type_for(block, true, false);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x, y as f32 + 1.0, z], [x + 1.0, y as f32 + 1.0, z],
-                         [x + 1.0, y as f32 + 1.0, z + 1.0], [x, y as f32 + 1.0, z + 1.0]],
+                        [[bx, by + 1.0, bz + 1.0], [bx + 1.0, by + 1.0, bz + 1.0],
+                         [bx + 1.0, by + 1.0, bz], [bx, by + 1.0, bz]],
                         [0.0, 1.0, 0.0],
                     );
                 }
 
-                // -Y
+                // -Y (bottom)
                 if y > 0 && !snap.get(lx, y - 1, lz).is_solid() {
                     let ft = face_type_for(block, false, true);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x, y as f32, z + 1.0], [x + 1.0, y as f32, z + 1.0],
-                         [x + 1.0, y as f32, z], [x, y as f32, z]],
+                        [[bx, by, bz], [bx + 1.0, by, bz],
+                         [bx + 1.0, by, bz + 1.0], [bx, by, bz + 1.0]],
                         [0.0, -1.0, 0.0],
                     );
                 }
 
-                // +Z
+                // +Z (front)
                 if !snap.get(lx, y, lz + 1).is_solid() {
                     let ft = face_type_for(block, false, false);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x + 1.0, y as f32, z + 1.0], [x, y as f32, z + 1.0],
-                         [x, y as f32 + 1.0, z + 1.0], [x + 1.0, y as f32 + 1.0, z + 1.0]],
+                        [[bx, by, bz + 1.0], [bx + 1.0, by, bz + 1.0],
+                         [bx + 1.0, by + 1.0, bz + 1.0], [bx, by + 1.0, bz + 1.0]],
                         [0.0, 0.0, 1.0],
                     );
                 }
 
-                // -Z
+                // -Z (back)
                 if !snap.get(lx, y, lz - 1).is_solid() {
                     let ft = face_type_for(block, false, false);
                     let b = builders.entry(ft).or_insert_with(MeshBuilder::new);
                     b.add_quad(
-                        [[x, y as f32, z], [x + 1.0, y as f32, z],
-                         [x + 1.0, y as f32 + 1.0, z], [x, y as f32 + 1.0, z]],
+                        [[bx + 1.0, by, bz], [bx, by, bz],
+                         [bx, by + 1.0, bz], [bx + 1.0, by + 1.0, bz]],
                         [0.0, 0.0, -1.0],
                     );
                 }
