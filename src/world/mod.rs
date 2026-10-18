@@ -2,6 +2,8 @@ pub mod chunk;
 pub mod generator;
 pub mod grass;
 pub mod sky;
+pub mod face_textures;
+pub mod greedy;
 
 use bevy::prelude::*;
 

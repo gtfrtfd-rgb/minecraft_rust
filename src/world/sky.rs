@@ -37,17 +37,8 @@ const SUN_EMISSIVE: f32 = 50.0;
 const CLOUD_Y: f32 = 60.0;
 const CLOUD_SIZE: f32 = 100_000.0;
 const CLOUD_TEX: u32 = 256;
-
-/// Сколько раз текстура тайлится по плоскости.
-/// Пропорционально росту CLOUD_SIZE, чтобы размер тайла в мире
-/// остался прежним (250 units на тайл).
 const CLOUD_UV_TILES: f32 = 400.0;
-
-/// Сколько квадратов по каждой стороне в сетке плоскости.
-/// Больше — точнее UV-интерполяция и меньше алиасинга.
-/// 16×16 = 256 квадов, 289 вершин — копейки.
 const CLOUD_SUBDIVISIONS: u32 = 16;
-
 const CLOUD_EMISSIVE: f32 = 3.0;
 const CLOUD_DRIFT_SPEED: f32 = 0.002;
 
@@ -100,10 +91,6 @@ fn sun_follow_player(
 // ОБЛАКА
 // ============================================================
 
-/// Строит подразделённую плоскость с UV в диапазоне 0..1.
-/// Сетка SUBDIVISIONS × SUBDIVISIONS квадов. Каждый квад имеет
-/// собственные UV в диапазоне, что резко улучшает точность
-/// интерполяции на больших размерах.
 fn build_cloud_mesh(size: f32, subdivisions: u32) -> Mesh {
     let step = size / subdivisions as f32;
     let half = size * 0.5;
@@ -205,11 +192,20 @@ fn update_clouds(
     let drift_dir = Vec2::new(1.0, 0.35).normalize();
     *uv_offset += drift_dir * time.delta_secs() * CLOUD_DRIFT_SPEED;
 
-    // Компенсация движения: плоскость едет +Δ, текстура должна
-    // компенсировать −Δ / tile_size.
-    *uv_offset -= delta / CLOUD_TILE_WORLD;
+    // Компенсация движения игрока.
+    //
+    // Плоскость сдвигается на +delta (следует за игроком). Значит
+    // UV-текстура на ней «уезжает» вместе с ней. Чтобы облака
+    // остались на месте в мире, надо сдвинуть UV в ту же сторону
+    // на delta / tile_size.
+    //
+    // Знак ВАЖЕН: если здесь минус, облака будут двигаться в
+    // 2 раза быстрее в сторону игрока (delta от плоскости + delta
+    // от UV-сдвига вместо компенсации).
+    *uv_offset += delta / CLOUD_TILE_WORLD;
 
-    // Wrap: держим offset в [0, 1), иначе f32 теряет точность.
+    // Wrap: держим offset в [0, 1), иначе f32 теряет точность
+    // на больших числах — это даёт дёргание.
     let wrapped = Vec2::new(
         uv_offset.x.rem_euclid(1.0),
         uv_offset.y.rem_euclid(1.0),
@@ -271,10 +267,6 @@ fn make_cloud_texture() -> Image {
         RenderAssetUsages::default(),
     );
 
-    // Ключевое отличие: mag_filter тоже Linear.
-    // Nearest даёт микро-скачки при повороте камеры, потому что
-    // жёстко выбирает один тексель на пиксель. Linear интерполирует
-    // между соседними — плавно и без дёрганья.
     img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
