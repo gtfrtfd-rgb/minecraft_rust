@@ -54,7 +54,9 @@ impl BlockType {
     pub fn top_tile(self) -> u32 {
         match self {
             BlockType::Air | BlockType::Stone => 3, BlockType::Grass => 0, BlockType::Dirt => 2,
-            BlockType::Cobblestone => 4, BlockType::Sand => 5, BlockType::Log | BlockType::Planks => 7,
+            BlockType::Cobblestone => 4, BlockType::Sand => 5, 
+            BlockType::Log => 7, 
+            BlockType::Planks => 9, // <-- Доски теперь одинаковые со всех сторон
             BlockType::Leaves => 8, BlockType::Brick => 10, BlockType::Glass => 11,
             BlockType::Snow => 12, BlockType::Obsidian => 13,
         }
@@ -72,7 +74,9 @@ impl BlockType {
     pub fn bottom_tile(self) -> u32 {
         match self {
             BlockType::Air | BlockType::Stone => 3, BlockType::Grass | BlockType::Dirt => 2,
-            BlockType::Cobblestone => 4, BlockType::Sand => 5, BlockType::Log | BlockType::Planks => 7,
+            BlockType::Cobblestone => 4, BlockType::Sand => 5, 
+            BlockType::Log => 7, 
+            BlockType::Planks => 9, // <-- То же самое снизу
             BlockType::Leaves => 8, BlockType::Brick => 10, BlockType::Glass => 11,
             BlockType::Snow => 12, BlockType::Obsidian => 13,
         }
@@ -254,7 +258,19 @@ fn make_atlas() -> Vec<u8> {
     draw_tile(&mut data, w, 6, 7, |x, y, s| { let n = hash(x, y, s); let stripe = ((x as f32 * 0.9).sin() * 0.05).abs(); let b = (0.42 + n * 0.08 + stripe) * 255.0; [b as u8, (b * 0.72) as u8, (b * 0.42) as u8, 255] });
     draw_tile(&mut data, w, 7, 8, |x, y, _s| { let dx = x as f32 - 7.5; let dy = y as f32 - 7.5; let r = (dx * dx + dy * dy).sqrt(); let ring = (r * 2.4).sin() * 0.05; let b = (0.55 + ring) * 255.0; [b as u8, (b * 0.78) as u8, (b * 0.48) as u8, 255] });
     draw_tile(&mut data, w, 8, 9, |x, y, s| { let n = hash(x, y, s); let dark = if n < 0.35 { -0.10 } else { 0.0 }; let b = (0.18 + n * 0.18 + dark).clamp(0.0, 1.0) * 255.0; let b = b as u8; [b, ((b as f32) * 1.7).min(255.0) as u8, b, 255] });
-    draw_tile(&mut data, w, 9, 10, |x, y, s| { let n = hash(x, y, s); let row = y / 4; let off = (row % 2) * 4; let line = if y % 4 == 0 || (x + off) % 8 == 0 { -0.12 } else { 0.0 }; let b = (0.65 + n * 0.06 + line).clamp(0.0, 1.0) * 255.0; let b = b as u8; [b, (b as f32 * 0.80) as u8, (b as f32 * 0.50) as u8, 255] });
+    
+    // Текстура Досок (tile 9)
+    draw_tile(&mut data, w, 9, 10, |x, y, s| {
+        let n = hash(x, y, s);
+        let row = y / 4;
+        // Один вертикальный стык на ряд, смещённый в случайную позицию
+        let off = (hash(row as u32, 0, s + 99) * 14.0) as u32 + 1;
+        let line = if y % 4 == 0 || x == off { -0.15 } else { 0.0 };
+        let b = (0.65 + n * 0.06 + line).clamp(0.0, 1.0) * 255.0;
+        let b = b as u8;
+        [b, (b as f32 * 0.80) as u8, (b as f32 * 0.50) as u8, 255]
+    });
+
     draw_tile(&mut data, w, 10, 11, |x, y, s| { let n = hash(x, y, s); let row = y / 4; let off = (row % 2) * 4; if y % 4 == 0 || (x + off) % 8 == 0 { [196, 190, 184, 255] } else { let r = (0.59 + n * 0.06) * 255.0; [r as u8, 66, 51, 255] } });
     draw_tile(&mut data, w, 11, 12, |_, _, _| [200, 226, 240, 255]);
     draw_tile(&mut data, w, 12, 13, |x, y, s| { let n = hash(x, y, s); let b = (0.92 + n * 0.05) * 255.0; [b as u8, (b * 0.98) as u8, (b * 0.99) as u8, 255] });
@@ -285,9 +301,6 @@ const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
 /// Проверяет 3 соседних блока в «наружной» плоскости грани:
 /// два по сторонам (side1, side2) и один по диагонали (corner).
 /// Возвращает 0.4..1.0 — множитель к цвету текстуры.
-///
-/// Логика как в MC: если обе стороны solid — затемнение максимальное
-/// (даже если угол пуст). Иначе 3 - сумма solid-соседей.
 #[inline]
 fn vertex_ao(
     snap: &ChunkSnapshot,
@@ -327,8 +340,7 @@ fn vertex_ao(
         3 - (s1 as u8 + s2 as u8 + corner as u8)
     };
 
-    // 0 → 0.4 (полная тень), 3 → 1.0 (полный свет).
-    const AO: [f32; 4] = [0.4, 0.6, 0.8, 1.0];
+    const AO: [f32; 4] = [0.55, 0.7, 0.85, 1.0];
     AO[level as usize]
 }
 
@@ -360,7 +372,6 @@ pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
                     let tuv = tile_uv(tile);
                     let base = positions.len() as u32;
 
-                    // Вычисляем AO для всех 4 вершин заранее (нужно для флипа).
                     let mut ao = [1.0_f32; 4];
                     for j in 0..4 {
                         let corner = corners[j];
@@ -378,8 +389,6 @@ pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
                         colors.push([ao[j], ao[j], ao[j], 1.0]);
                     }
 
-                    // Флип диагонали — устраняет видимые швы AO между
-                    // соседними квадами. Как в MC.
                     if ao[0] + ao[2] > ao[1] + ao[3] {
                         indices.extend_from_slice(&[
                             base + 1, base + 2, base + 3,
@@ -441,9 +450,6 @@ fn setup_chunk_render_assets(
     atlas_image.sampler = ImageSampler::nearest();
     let atlas_handle = images.add(atlas_image);
 
-    // unlit + vertex colors = AO.
-    // В Bevy StandardMaterial с unlit всё равно умножает base_color
-    // на texture_color на vertex_color. Значит AO из вершин работает.
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(atlas_handle),
