@@ -466,12 +466,11 @@ fn setup_mob_assets(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    // Один атлас и один материал.
     let atlas = images.add(make_mob_atlas());
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(atlas),
-        unlit: false,
+        unlit: true,                    // <-- добавить
         perceptual_roughness: 1.0,
         metallic: 0.0,
         ..default()
@@ -488,7 +487,7 @@ fn setup_mob_assets(
         chicken_leg:  meshes.add(build_leg_mesh(MobType::Chicken)),
         material,
     });
-    info!("MobSpawn: assets built (1 atlas 128×64, 1 material, 8 meshes)");
+    info!("MobSpawn: assets built (unlit, 1 atlas, 1 material)");
 }
 
 // ============================================================

@@ -80,7 +80,7 @@ impl BlockType {
 }
 
 // ============================================================
-// ДАННЫЕ ЧАНКА И СНИМОК (без изменений)
+// ДАННЫЕ ЧАНКА И СНИМОК
 // ============================================================
 #[derive(Clone)]
 pub struct ChunkData { pub blocks: Vec<BlockType> }
@@ -281,11 +281,62 @@ const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
     ([0, 0, -1], [[1.0,0.0,0.0],[0.0,0.0,0.0],[0.0,1.0,0.0],[1.0,1.0,0.0]]),
 ];
 
-/// Строит единый меш для чанка из снимка. 1 материал, 1 draw call.
+/// Вычисляет AO-фактор для вершины грани.
+/// Проверяет 3 соседних блока в «наружной» плоскости грани:
+/// два по сторонам (side1, side2) и один по диагонали (corner).
+/// Возвращает 0.4..1.0 — множитель к цвету текстуры.
+///
+/// Логика как в MC: если обе стороны solid — затемнение максимальное
+/// (даже если угол пуст). Иначе 3 - сумма solid-соседей.
+#[inline]
+fn vertex_ao(
+    snap: &ChunkSnapshot,
+    bx: i32, by: i32, bz: i32,
+    nx: i32, ny: i32, nz: i32,
+    cx: i32, cy: i32, cz: i32,
+) -> f32 {
+    let (s1, s2, corner) = if nx != 0 {
+        let sy = if cy == 0 { -1 } else { 1 };
+        let sz = if cz == 0 { -1 } else { 1 };
+        (
+            snap.get(bx + nx, by + sy, bz).is_solid(),
+            snap.get(bx + nx, by, bz + sz).is_solid(),
+            snap.get(bx + nx, by + sy, bz + sz).is_solid(),
+        )
+    } else if ny != 0 {
+        let sx = if cx == 0 { -1 } else { 1 };
+        let sz = if cz == 0 { -1 } else { 1 };
+        (
+            snap.get(bx + sx, by + ny, bz).is_solid(),
+            snap.get(bx, by + ny, bz + sz).is_solid(),
+            snap.get(bx + sx, by + ny, bz + sz).is_solid(),
+        )
+    } else {
+        let sx = if cx == 0 { -1 } else { 1 };
+        let sy = if cy == 0 { -1 } else { 1 };
+        (
+            snap.get(bx + sx, by, bz + nz).is_solid(),
+            snap.get(bx, by + sy, bz + nz).is_solid(),
+            snap.get(bx + sx, by + sy, bz + nz).is_solid(),
+        )
+    };
+
+    let level = if s1 && s2 {
+        0
+    } else {
+        3 - (s1 as u8 + s2 as u8 + corner as u8)
+    };
+
+    // 0 → 0.4 (полная тень), 3 → 1.0 (полный свет).
+    const AO: [f32; 4] = [0.4, 0.6, 0.8, 1.0];
+    AO[level as usize]
+}
+
 pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(4096);
     let mut normals:   Vec<[f32; 3]> = Vec::with_capacity(4096);
     let mut uvs:       Vec<[f32; 2]> = Vec::with_capacity(4096);
+    let mut colors:    Vec<[f32; 4]> = Vec::with_capacity(4096);
     let mut indices:   Vec<u32>      = Vec::with_capacity(6144);
 
     let x_start = snap.coord.x * CHUNK_SIZE;
@@ -309,12 +360,37 @@ pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
                     let tuv = tile_uv(tile);
                     let base = positions.len() as u32;
 
+                    // Вычисляем AO для всех 4 вершин заранее (нужно для флипа).
+                    let mut ao = [1.0_f32; 4];
+                    for j in 0..4 {
+                        let corner = corners[j];
+                        ao[j] = vertex_ao(
+                            snap, lx, y, lz,
+                            dir[0], dir[1], dir[2],
+                            corner[0] as i32, corner[1] as i32, corner[2] as i32,
+                        );
+                    }
+
                     for (j, corner) in corners.iter().enumerate() {
                         positions.push([x as f32 + corner[0], y as f32 + corner[1], z as f32 + corner[2]]);
                         normals.push([dir[0] as f32, dir[1] as f32, dir[2] as f32]);
                         uvs.push(tuv[j]);
+                        colors.push([ao[j], ao[j], ao[j], 1.0]);
                     }
-                    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+
+                    // Флип диагонали — устраняет видимые швы AO между
+                    // соседними квадами. Как в MC.
+                    if ao[0] + ao[2] > ao[1] + ao[3] {
+                        indices.extend_from_slice(&[
+                            base + 1, base + 2, base + 3,
+                            base + 1, base + 3, base,
+                        ]);
+                    } else {
+                        indices.extend_from_slice(&[
+                            base, base + 1, base + 2,
+                            base, base + 2, base + 3,
+                        ]);
+                    }
                 }
             }
         }
@@ -324,6 +400,7 @@ pub fn build_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
 }
@@ -364,7 +441,9 @@ fn setup_chunk_render_assets(
     atlas_image.sampler = ImageSampler::nearest();
     let atlas_handle = images.add(atlas_image);
 
-    // Один материал, unlit, без PBR и света. Быстрее в 3-4 раза.
+    // unlit + vertex colors = AO.
+    // В Bevy StandardMaterial с unlit всё равно умножает base_color
+    // на texture_color на vertex_color. Значит AO из вершин работает.
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         base_color_texture: Some(atlas_handle),
@@ -374,12 +453,10 @@ fn setup_chunk_render_assets(
     });
 
     commands.insert_resource(ChunkRenderAssets { material });
-    info!("Atlas generated, single unlit material ready");
+    info!("Atlas generated, vertex AO baked, unlit material ready");
 }
 
 fn setup_lights(mut commands: Commands) {
-    // ОДИН источник света (для мобов, которые используют StandardMaterial с PBR).
-    // Блоки unlit — им свет не нужен.
     commands.spawn((
         DirectionalLight { illuminance: 8000.0, shadow_maps_enabled: false, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.9, -0.5, 0.0)),
@@ -513,11 +590,10 @@ fn rebuild_dirty_chunks(
     world: Res<WorldData>,
     mut dirty: ResMut<DirtyChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
-    assets: Option<Res<ChunkRenderAssets>>,
+    _assets: Option<Res<ChunkRenderAssets>>,
     mut chunk_q: Query<(Entity, &ChunkMesh, &mut Mesh3d)>,
     mut pending_mesh: ResMut<PendingMeshes>,
 ) {
-    let Some(assets) = assets else { return; };
     if dirty.0.is_empty() { return; }
     dirty.0.sort_by_key(|c| (c.x, c.y)); dirty.0.dedup();
     let coords: Vec<IVec2> = std::mem::take(&mut dirty.0);
@@ -531,6 +607,5 @@ fn rebuild_dirty_chunks(
         for (_, chunk, mut mesh3d) in chunk_q.iter_mut() {
             if chunk.coord == coord { mesh3d.0 = new_handle.clone(); break; }
         }
-        let _ = &assets.material;
     }
 }
