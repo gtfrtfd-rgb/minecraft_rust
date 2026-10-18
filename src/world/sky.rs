@@ -35,9 +35,9 @@ const SUN_DISTANCE: f32 = 1500.0;
 const SUN_EMISSIVE: f32 = 50.0;
 
 const CLOUD_Y: f32 = 60.0;
-const CLOUD_SIZE: f32 = 100_000.0;
+const CLOUD_SIZE: f32 = 20_000.0;   // было 100_000
 const CLOUD_TEX: u32 = 256;
-const CLOUD_UV_TILES: f32 = 400.0;
+const CLOUD_UV_TILES: f32 = 80.0;   // было 400 — сохраняем пропорцию
 const CLOUD_SUBDIVISIONS: u32 = 16;
 const CLOUD_EMISSIVE: f32 = 3.0;
 const CLOUD_DRIFT_SPEED: f32 = 0.002;

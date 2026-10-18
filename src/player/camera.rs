@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseMotion;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use crate::core::state::{AppState, PlayerLook, Settings};
 use super::controller::Player;
 
@@ -21,6 +22,8 @@ impl Plugin for PlayerCameraPlugin {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
+        Msaa::Off,                    // <-- отключаем MSAA
+        Tonemapping::None,            // <-- отключаем tone mapping
         Transform::from_xyz(128.0, 42.0, 128.0)
             .looking_at(Vec3::new(128.0, 20.0, 100.0), Vec3::Y),
         PlayerCamera,
