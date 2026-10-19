@@ -32,7 +32,8 @@ impl Plugin for PlayerControllerPlugin {
         app.add_systems(Startup, spawn_player)
             .add_systems(
                 Update,
-                (player_movement, toggle_fly).run_if(in_state(AppState::InGame)),
+                (unstick_player, player_movement, toggle_fly).chain()
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -110,6 +111,72 @@ fn ground_surface_below(world: &WorldData, px: f32, py: f32, pz: f32) -> Option<
     best
 }
 
+/// Проверяет, стоит ли игрок в коллизии (застрял в блоке).
+/// Если да — поднимает на ближайший свободный y (или, если
+/// сверху потолок, спускается вниз). Так игрок никогда не
+/// «залипает» после загрузки из сохранения с плохой позицией
+/// или после того как его зажало между блоков.
+///
+/// Не трогаем случай, когда игрок в полёте — там коллизии
+/// намеренно разрешены.
+fn unstick_player(
+    world: Res<WorldData>,
+    mut player_q: Query<(&mut Transform, &mut Player)>,
+    mut last_log: Local<f32>,
+) {
+    let Ok((mut tf, mut player)) = player_q.single_mut() else { return; };
+
+    // Пока мир не загружен — не трогаем.
+    if world.chunks.is_empty() { return; }
+    if player.fly { return; }
+
+    let pos = tf.translation;
+    if !collides(&world, pos.x, pos.y, pos.z) { return; }
+
+    // Застряли. Ищем свободное место вверх (до 5 блоков).
+    let mut test_y = pos.y;
+    for _ in 0..10 {
+        test_y += 0.5;
+        if !collides(&world, pos.x, test_y, pos.z) {
+            tf.translation.y = test_y;
+            player.velocity.y = 0.0;
+            player.on_ground = false;
+            info!(
+                "Unstick: player was inside a block at y={:.2}, moved up to y={:.2}",
+                pos.y, test_y
+            );
+            return;
+        }
+    }
+
+    // Сверху потолок. Пробуем вниз.
+    test_y = pos.y;
+    for _ in 0..10 {
+        test_y -= 0.5;
+        if !collides(&world, pos.x, test_y, pos.z) {
+            tf.translation.y = test_y;
+            player.velocity.y = 0.0;
+            player.on_ground = false;
+            info!(
+                "Unstick: player was inside a block at y={:.2}, moved down to y={:.2}",
+                pos.y, test_y
+            );
+            return;
+        }
+    }
+
+    // Не нашли ни сверху, ни снизу. Логируем, но ничего не делаем —
+    // пусть игрок сам разбирается (прыжок).
+    let t = pos.x + pos.y * 100.0 + pos.z * 1000.0;
+    if (t - *last_log).abs() > 1.0 {
+        *last_log = t;
+        warn!(
+            "Unstick: player stuck at ({:.2}, {:.2}, {:.2}) but no free space found within ±5 blocks",
+            pos.x, pos.y, pos.z
+        );
+    }
+}
+
 fn player_movement(
     mut player_q: Query<(&mut Transform, &mut Player)>,
     world: Res<WorldData>,
@@ -118,6 +185,8 @@ fn player_movement(
     binds: Res<KeyBinds>,
     time: Res<Time>,
 ) {
+    if world.chunks.is_empty() { return; }
+
     let dt = time.delta_secs().min(0.05);
 
     let yaw = look.yaw;
@@ -131,53 +200,31 @@ fn player_movement(
     for (mut transform, mut player) in player_q.iter_mut() {
         let mut dir = Vec3::ZERO;
 
-        if keys.pressed(binds.forward) {
-            dir += forward;
-        }
-        if keys.pressed(binds.backward) {
-            dir -= forward;
-        }
-        if keys.pressed(binds.right) {
-            dir += right;
-        }
-        if keys.pressed(binds.left) {
-            dir -= right;
-        }
+        if keys.pressed(binds.forward) { dir += forward; }
+        if keys.pressed(binds.backward) { dir -= forward; }
+        if keys.pressed(binds.right) { dir += right; }
+        if keys.pressed(binds.left) { dir -= right; }
 
-        if dir.length_squared() > 0.0 {
-            dir = dir.normalize();
-        }
+        if dir.length_squared() > 0.0 { dir = dir.normalize(); }
 
-        if space_held {
-            player.jump_buffer = JUMP_BUFFER;
-        }
+        if space_held { player.jump_buffer = JUMP_BUFFER; }
         if player.jump_buffer > 0.0 {
             player.jump_buffer -= dt;
-            if player.jump_buffer < 0.0 {
-                player.jump_buffer = 0.0;
-            }
+            if player.jump_buffer < 0.0 { player.jump_buffer = 0.0; }
         }
 
         if player.fly {
             let speed = if sprint_held { FLY_SPEED_FAST } else { FLY_SPEED };
             let mut vel = dir * speed;
-            if space_held {
-                vel.y += speed;
-            }
-            if sneak_held {
-                vel.y -= speed;
-            }
+            if space_held { vel.y += speed; }
+            if sneak_held { vel.y -= speed; }
             player.velocity = vel;
 
             let pos = transform.translation;
             let new_x = pos.x + player.velocity.x * dt;
-            if !collides(&world, new_x, pos.y, pos.z) {
-                transform.translation.x = new_x;
-            }
+            if !collides(&world, new_x, pos.y, pos.z) { transform.translation.x = new_x; }
             let new_z = pos.z + player.velocity.z * dt;
-            if !collides(&world, transform.translation.x, pos.y, new_z) {
-                transform.translation.z = new_z;
-            }
+            if !collides(&world, transform.translation.x, pos.y, new_z) { transform.translation.z = new_z; }
             let new_y = pos.y + player.velocity.y * dt;
             if !collides(&world, transform.translation.x, new_y, transform.translation.z) {
                 transform.translation.y = new_y;
@@ -192,21 +239,15 @@ fn player_movement(
         let horiz_vel = if sneak_held { horiz_vel * 0.5 } else { horiz_vel };
 
         player.velocity.y -= GRAVITY * dt;
-        if player.velocity.y < -55.0 {
-            player.velocity.y = -55.0;
-        }
+        if player.velocity.y < -55.0 { player.velocity.y = -55.0; }
 
         let pos = transform.translation;
 
         let new_x = pos.x + horiz_vel.x * dt;
-        if !collides(&world, new_x, pos.y, pos.z) {
-            transform.translation.x = new_x;
-        }
+        if !collides(&world, new_x, pos.y, pos.z) { transform.translation.x = new_x; }
 
         let new_z = pos.z + horiz_vel.z * dt;
-        if !collides(&world, transform.translation.x, pos.y, new_z) {
-            transform.translation.z = new_z;
-        }
+        if !collides(&world, transform.translation.x, pos.y, new_z) { transform.translation.z = new_z; }
 
         let was_on_ground = player.on_ground;
         let new_y = pos.y + player.velocity.y * dt;

@@ -13,7 +13,9 @@ use crate::player::controller::Player;
 use crate::core::state::{
     WorldSeed, PlayerLook, SY, CHUNK_SIZE, AppState,
     data_dir, worlds_dir, PendingLoadWorld, ActiveWorld,
+    
 };
+use crate::mobs::ai::Mob;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlayerMeta {
@@ -109,11 +111,11 @@ fn migrate_legacy_save_if_needed() {
 
 /// Загружает мир при входе в InGame.
 ///
-/// ВАЖНО: очищаем все pending async-задачи, чтобы результаты от
-/// прошлого мира не прилетели в новый. Без этого задачи с чанками
-/// старого сида вставляются в мир, создавая мусор и утечку памяти
-/// (задачи никто не отменяет — они доживают до конца, занимая слоты
-/// в AsyncComputeTaskPool).
+/// КРИТИЧНО: файл читается и парсится ПЕРВЫМ. Если он битый или
+/// отсутствует — мы ничего не стираем и не трогаем `active.0`,
+/// а возвращаемся в меню. Иначе бы стёрли текущий мир и оставили
+/// `active.0` указывающим на ПРОШЛЫЙ мир — автосейв перезаписал
+/// бы чужой файл пустотой.
 fn on_enter_ingame(
     mut pending_load: ResMut<PendingLoadWorld>,
     mut loaded: ResMut<LoadedSave>,
@@ -126,44 +128,54 @@ fn on_enter_ingame(
     mut look: ResMut<PlayerLook>,
     mut player_q: Query<(&mut Transform, &mut Player)>,
     chunk_q: Query<Entity, With<ChunkMesh>>,
+    mob_q: Query<Entity, With<Mob>>,
     mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     let Some(path) = pending_load.0.take() else { return; };
 
-    // Очищаем старый мир.
+    // ── Шаг 1. Читаем файл. Ничего не трогаем, пока не убедимся,
+    //           что данные валидны. ──
+    let meta = match fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str::<SaveMeta>(&s) {
+            Ok(m) => m,
+            Err(e) => {
+                error!(
+                    "Failed to parse world file {:?}: {}. \
+                     Returning to menu, previous world untouched.",
+                    path, e
+                );
+                next_state.set(AppState::Menu);
+                return;
+            }
+        },
+        Err(e) => {
+            error!(
+                "Failed to read world file {:?}: {}. \
+                 Returning to menu, previous world untouched.",
+                path, e
+            );
+            next_state.set(AppState::Menu);
+            return;
+        }
+    };
+
+    // ── Шаг 2. Файл валиден. Стираем старый мир и всех мобов. ──
     for entity in chunk_q.iter() {
+        commands.entity(entity).despawn();
+    }
+    for entity in mob_q.iter() {
         commands.entity(entity).despawn();
     }
     world.chunks.clear();
     world.edits.clear();
     dirty.0.clear();
-
-    // Ключевая правка: очищаем async-задачи от прошлой сессии.
-    // Задачи нельзя "отменить" — они досчитают в фоне и вернут
-    // результат, который мы просто проигнорируем. Но убирая их
-    // из Vec, мы:
-    //   • не поллим их в stream_chunks → не вставим мусор в мир;
-    //   • освобождаем слоты MAX_GEN_IN_FLIGHT / MAX_MESH_IN_FLIGHT
-    //     для новых задач нового мира;
-    //   • не даём им накапливаться между заходами в разные миры.
     pending_chunks.tasks.clear();
     pending_meshes.tasks.clear();
 
-    // Читаем meta.
-    let Ok(s) = fs::read_to_string(&path) else {
-        warn!("Cannot read world file {:?}", path);
-        return;
-    };
-    let meta = match serde_json::from_str::<SaveMeta>(&s) {
-        Ok(m) => m,
-        Err(e) => { warn!("Parse world file error: {}", e); return; }
-    };
-
-    // Сид. Это триггерит update_perlin_cache в следующем Update
-    // до stream_chunks в PostUpdate — Perlin пересоздастся.
+    // ── Шаг 3. Применяем данные из meta. ──
     seed.0 = meta.seed;
 
-    // Правки.
     for edit in &meta.edits {
         if edit.y < 0 || edit.y >= SY { continue; }
         let cx = edit.x.div_euclid(CHUNK_SIZE);
@@ -173,7 +185,6 @@ fn on_enter_ingame(
             .insert(IVec3::new(edit.x, edit.y, edit.z), BlockType::from_u8(edit.block));
     }
 
-    // Игрок.
     if let Ok((mut tf, mut player)) = player_q.single_mut() {
         tf.translation = Vec3::new(meta.player.x, meta.player.y, meta.player.z);
         player.fly = meta.player.fly;
@@ -189,14 +200,12 @@ fn on_enter_ingame(
         meta.edits.len()
     );
 
+    // ── Шаг 4. Только ТЕПЕРЬ помечаем мир активным. ──
     active.0 = Some(path);
     loaded.meta = Some(meta);
 }
 
 /// Сохраняет мир при выходе из игры.
-/// Плюс очищает async-задачи, чтобы они не крутились в фоне
-/// в меню. При следующем входе в мир они не нужны — сгенерируются
-/// заново.
 fn on_exit_ingame(
     active: Res<ActiveWorld>,
     world: Res<WorldData>,
@@ -207,14 +216,21 @@ fn on_exit_ingame(
     mut pending_meshes: ResMut<PendingMeshes>,
 ) {
     let Some(path) = active.0.clone() else { return; };
-    if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
-        warn!("Save on exit failed: {}", e);
+    match save_game_to(path, &world, &seed, &look, &player_q) {
+        Ok(()) => {
+            pending_chunks.tasks.clear();
+            pending_meshes.tasks.clear();
+        }
+        Err(e) => {
+            warn!(
+                "Save on exit failed: {}. \
+                 Original file on disk is intact (atomic write).",
+                e
+            );
+            // Активные pending-задачи не трогаем — если игрок опять
+            // зайдёт в мир, будет повторная попытка сохранить.
+        }
     }
-
-    // Чистим задачи, чтобы не жгли CPU в главном меню и не
-    // занимали слоты, когда игрок вернётся в другой мир.
-    pending_chunks.tasks.clear();
-    pending_meshes.tasks.clear();
 }
 
 fn auto_save(
@@ -232,7 +248,7 @@ fn auto_save(
     *timer = 0.0;
 
     if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
-        warn!("Autosave failed: {}", e);
+        warn!("Autosave failed: {}. Disk intact.", e);
     }
 }
 
@@ -251,10 +267,18 @@ fn save_on_app_exit(
     let Some(path) = active.0.clone() else { return; };
     info!("Saving world before exit...");
     if let Err(e) = save_game_to(path, &world, &seed, &look, &player_q) {
-        warn!("Save on exit failed: {}", e);
+        warn!("Save on app exit failed: {}. Disk intact.", e);
     }
 }
 
+/// Атомарное сохранение мира.
+///
+/// Записываем в `.json.tmp`, потом rename поверх основного файла.
+/// Rename атомарен на Linux/macOS (POSIX) и Windows
+/// (`MoveFileExW` с `MOVEFILE_REPLACE_EXISTING`). Если запись в
+/// tmp упадёт — оригинал не тронут. Плюс сохраняем `.json.bak`
+/// предыдущей версии — на случай, если пользователь захочет
+/// вручную восстановить.
 fn save_game_to(
     path: PathBuf,
     world: &WorldData,
@@ -266,6 +290,7 @@ fn save_game_to(
         return Err("player not found".into());
     };
 
+    // Имя мира — не перезаписываем, читаем старое (если файл ещё цел).
     let world_name = fs::read_to_string(&path).ok()
         .and_then(|s| serde_json::from_str::<SaveMeta>(&s).ok())
         .map(|m| m.world_name)
@@ -275,10 +300,7 @@ fn save_game_to(
     for chunk_edits in world.edits.values() {
         for (&pos, &block) in chunk_edits {
             edits.push(BlockEdit {
-                x: pos.x,
-                y: pos.y,
-                z: pos.z,
-                block: block.to_u8(),
+                x: pos.x, y: pos.y, z: pos.z, block: block.to_u8(),
             });
         }
     }
@@ -306,12 +328,30 @@ fn save_game_to(
     };
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create dir: {}", e))?;
     }
 
-    let json = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(|e| format!("serialize: {}", e))?;
 
-    info!("Saved {} block edits", meta.edits.len());
+    // 1) Пишем в tmp-файл. Если упадёт — оригинал цел.
+    let tmp_path = path.with_extension("json.tmp");
+    fs::write(&tmp_path, &json)
+        .map_err(|e| format!("write tmp: {}", e))?;
+
+    // 2) Делаем .bak (best-effort) — на случай ручного восстановления.
+    if path.exists() {
+        let bak_path = path.with_extension("json.bak");
+        let _ = fs::copy(&path, &bak_path);
+    }
+
+    // 3) Атомарный rename. Если упадёт — чистим tmp.
+    if let Err(e) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("rename: {}", e));
+    }
+
+    info!("Saved world: {} edits → {:?}", meta.edits.len(), path);
     Ok(())
 }
